@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Support\AuditLogger;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
@@ -48,8 +51,30 @@ class NewPasswordController extends Controller
             function ($user) use ($request) {
                 $user->forceFill([
                     'password' => Hash::make($request->password),
+                    // Rotating this invalidates any "remember me" cookie issued
+                    // before the reset.
                     'remember_token' => Str::random(60),
+                    // A suspended account is not silently reactivated by a
+                    // reset; only an admin may lift a suspension.
+                    'status' => $user->status === User::STATUS_INVITED
+                        ? User::STATUS_ACTIVE
+                        : $user->status,
                 ])->save();
+
+                // AC-AUTH-07: every OTHER session for this user must die. The
+                // whole point of a reset is often that someone else has the old
+                // password — leaving their session alive defeats it.
+                //
+                // Auth::logoutOtherDevices() is not usable here: it requires the
+                // current password and an authenticated session, and a reset
+                // happens while logged out. With the database session driver the
+                // rows are ours to delete.
+                DB::table('sessions')
+                    ->where('user_id', $user->id)
+                    ->where('id', '!=', $request->session()->getId())
+                    ->delete();
+
+                app(AuditLogger::class)->record('auth.password.reset', $user);
 
                 event(new PasswordReset($user));
             }

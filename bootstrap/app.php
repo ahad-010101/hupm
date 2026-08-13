@@ -32,6 +32,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
+            // Laravel's session.lifetime is an idle timeout that slides forward
+            // on every request. FR-AUTH-04 also demands a hard 12-hour ceiling,
+            // which nothing in the framework provides.
+            \App\Http\Middleware\EnforceAbsoluteSessionLifetime::class,
+        ]);
+
+        $middleware->alias([
+            'role' => \App\Http\Middleware\EnsureRole::class,
         ]);
 
         // [DEVIATION D-05] The public middleware group is the 'web' stack minus

@@ -36,6 +36,7 @@ class ConfirmablePasswordController extends Controller
 
         $request->session()->put('auth.password_confirmed_at', time());
 
-        return redirect()->intended(route('dashboard', absolute: false));
+        // There is no single dashboard — each role has its own home (FR-AUTH-01).
+        return redirect()->intended($request->user()->homeRoute());
     }
 }

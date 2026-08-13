@@ -66,7 +66,7 @@ class Preflight extends Command
         $this->checkExtensions();
         $this->checkIni();
         $this->checkDatabase();
-        $this->checkMail();
+        $this->checkRuntimeDrivers();
         $this->checkFilesystem();
         $this->checkOutbound();
         $this->checkScheduler();
@@ -163,8 +163,20 @@ class Preflight extends Command
      * secret disables the check, not the route. That fails open, so an empty
      * secret is treated here as a hard failure rather than a warning.
      */
-    private function checkMail(): void
+    private function checkRuntimeDrivers(): void
     {
+        // AC-AUTH-07 deletes session rows to invalidate other sessions after a
+        // password reset. That only works on the database driver — with `file`
+        // there is nothing to delete and the guarantee silently disappears.
+        $sessionDriver = (string) config('session.driver');
+        $this->record('session driver', $sessionDriver, $sessionDriver === 'database');
+
+        $queueDriver = (string) config('queue.default');
+        $this->record('queue driver', $queueDriver, $queueDriver === 'database');
+
+        $cacheDriver = (string) config('cache.default');
+        $this->record('cache driver', $cacheDriver, $cacheDriver === 'database');
+
         $mailer = config('mail.default');
         $this->record('mail transport', (string) $mailer, true, required: false);
 

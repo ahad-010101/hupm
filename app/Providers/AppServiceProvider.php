@@ -2,12 +2,16 @@
 
 namespace App\Providers;
 
+use App\Models\User;
 use App\Support\AuditLogger;
 use App\Support\BusinessCalendar;
+use App\Support\PermissionMatrix;
 use App\Support\Settings;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Vite;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -55,5 +59,26 @@ class AppServiceProvider extends ServiceProvider
         // Lazy loading in a loop over ledger entries is how a balance page turns
         // into 400 queries on shared hosting.
         Model::preventLazyLoading(! $this->app->isProduction());
+
+        // The TDD §5.3 matrix defines the Gate, rather than being restated in
+        // it. Every capability in the specification becomes an ability with the
+        // same name, so a feature package cannot invent its own answer to a
+        // question the matrix already settles.
+        foreach (PermissionMatrix::capabilities() as $capability) {
+            Gate::define($capability, fn (User $user) => PermissionMatrix::allows($capability, $user->role));
+        }
+
+        // One password policy for every path that sets one: invitation, reset
+        // and change (TDD §4). Defined once so the three cannot drift apart.
+        // `uncompromised()` checks Have I Been Pwned's k-anonymity API — a
+        // 12-character password that already appears in a breach corpus is not
+        // a strong password.
+        Password::defaults(function () {
+            $rule = Password::min(12);
+
+            // The check is skipped in tests, which must not depend on an
+            // outbound HTTP call to a third party to pass.
+            return $this->app->runningUnitTests() ? $rule : $rule->uncompromised();
+        });
     }
 }

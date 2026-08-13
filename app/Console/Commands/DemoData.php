@@ -38,8 +38,8 @@ class DemoData extends Command
         $this->call('db:seed', ['--class' => DemoDataSeeder::class, '--force' => true]);
 
         $this->newLine();
-        $this->components->twoColumnDetail('<fg=green>Admin login</>', 'admin@hupm.test / password');
-        $this->components->twoColumnDetail('<fg=green>Tenant logins</>', 'see the tenants table — all use / password');
+        $this->components->twoColumnDetail('<fg=green>Admin login</>', 'admin@hupm.test / hupm-local-dev-2026');
+        $this->components->twoColumnDetail('<fg=green>Tenant logins</>', 'see the tenants table — all use / hupm-local-dev-2026');
         $this->components->warn('Synthetic data. Not the client portfolio — WP-08 imports the real one.');
 
         return self::SUCCESS;

@@ -29,7 +29,7 @@ class AdminUserSeeder extends Seeder
             [
                 'tenant_id' => null,
                 'name' => 'Local Admin',
-                'password' => Hash::make('password'),
+                'password' => Hash::make('hupm-local-dev-2026'),
                 'role' => 'admin',
                 'status' => 'active',
                 'created_at' => now(),

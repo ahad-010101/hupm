@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -10,16 +11,39 @@ use Inertia\Inertia;
 |--------------------------------------------------------------------------
 |
 | The public site is NOT here. It lives in routes/public.php and renders in
-| Blade (D-05). Nothing in this file should be reachable without auth once
-| WP-04 lands.
+| Blade (D-05).
+|
+| Role is enforced by the `role` middleware (403 on the wrong role, TDD §5.1).
+| Ownership is enforced by policy inside each controller and returns 404, never
+| 403 (I-9) — the two are deliberately different mechanisms.
 |
 */
 
-Route::get('/dashboard', function () {
-    return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
-
 Route::middleware('auth')->group(function () {
+    /*
+     | Tenant portal
+     */
+    Route::middleware('role:tenant')->prefix('portal')->name('portal.')->group(function () {
+        Route::get('/', fn () => Inertia::render('Portal/Dashboard'))->name('dashboard');
+        Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
+        Route::get('/documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
+    });
+
+    /*
+     | Admin console
+     */
+    Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
+        Route::get('/', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
+    });
+
+    /*
+     | Owner. [GATE Q-11] Whether this role ships at all is unanswered; it is
+     | behind roles.owner_enabled, default false.
+     */
+    Route::middleware('role:owner')->prefix('owner')->name('owner.')->group(function () {
+        Route::get('/', fn () => Inertia::render('Owner/Summary'))->name('summary');
+    });
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
@@ -31,13 +55,8 @@ Route::middleware('auth')->group(function () {
 |--------------------------------------------------------------------------
 |
 | Renders every shared component in every state inside each layout, so the
-| WP-05 acceptance criteria can be checked by looking: all four layouts at
-| 375 / 768 / 1440px, keyboard traversal with a visible focus ring, and no
-| critical axe violations.
-|
-| Registered only in local and testing. It is not behind auth, so it must not
-| exist anywhere else — and a route that only exists locally cannot be reached
-| in production even if a link to it survives.
+| WP-05 acceptance criteria can be checked by looking. Registered only in local
+| and testing, so it cannot be reached in production even if a link survives.
 |
 */
 if (app()->environment(['local', 'testing'])) {

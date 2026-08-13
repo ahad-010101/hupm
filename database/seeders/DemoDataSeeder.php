@@ -173,9 +173,10 @@ class DemoDataSeeder extends Seeder
                     'tenant_id' => $tenantId,
                     'name' => "{$first} {$last}",
                     'email' => $email,
-                    // Every demo tenant shares this password; the seeder refuses
+                    // Every demo tenant shares this password. It satisfies the 12-character
+                    // policy so the seed data cannot teach a habit the app rejects. The seeder refuses
                     // to run outside local/testing, so it never reaches a real box.
-                    'password' => Hash::make('password'),
+                    'password' => Hash::make('hupm-local-dev-2026'),
                     'role' => 'tenant',
                     // A few are still `invited` so the set-password flow (WP-04)
                     // has something to exercise.

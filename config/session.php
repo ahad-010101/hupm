@@ -38,6 +38,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Absolute Session Lifetime  [FR-AUTH-04, DERIVED]
+    |--------------------------------------------------------------------------
+    |
+    | `lifetime` above is an IDLE timeout — it slides forward on every request,
+    | so an active session never ends. This is the hard ceiling, in minutes,
+    | applied regardless of activity by EnforceAbsoluteSessionLifetime.
+    |
+    */
+
+    'absolute_lifetime' => (int) env('SESSION_ABSOLUTE_LIFETIME', 720), // 12 hours
+
+    /*
+    |--------------------------------------------------------------------------
     | Session Encryption
     |--------------------------------------------------------------------------
     |
