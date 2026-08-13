@@ -3,7 +3,11 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -40,5 +44,44 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // FS §18.3 error states.
         //
+        // Error pages render in Blade for both pipelines. An Inertia error page
+        // needs the JS bundle to have loaded, which is exactly what cannot be
+        // relied on when something has already gone wrong — and the public site
+        // has no bundle at all (D-05).
+
+        // Ownership violations return 404, never 403. A 403 confirms the record
+        // exists, which tells tenant A that tenant B is a customer here
+        // (invariant I-9, BR-20). Policies throw ModelNotFound for this reason.
+        $exceptions->dontReport(App\Exceptions\ImmutableRecordException::class);
+
+        $exceptions->respond(function (Response $response, Throwable $e, Request $request) {
+            $status = $response->getStatusCode();
+
+            if ($status === 419) {
+                // Session expired. Say what happened and what to do — never a
+                // bare "page expired".
+                return redirect()->guest(route('login'))
+                    ->with('status', 'Your session expired for security. Please sign in again to continue.');
+            }
+
+            if ($status === 500 && ! config('app.debug')) {
+                // A reference the tenant can quote and an admin can grep for.
+                // No stack trace reaches the browser.
+                $reference = strtoupper(Str::random(8));
+
+                Log::error('Unhandled exception', [
+                    'reference' => $reference,
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                    'url' => $request->fullUrl(),
+                    'user_id' => $request->user()?->id,
+                ]);
+
+                return response()->view('errors.500', ['reference' => $reference], 500);
+            }
+
+            return $response;
+        });
     })->create();
