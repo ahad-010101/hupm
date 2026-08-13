@@ -1,0 +1,229 @@
+import { useState } from 'react';
+import { Link, usePage } from '@inertiajs/react';
+import {
+    ArrowUpTrayIcon,
+    BanknotesIcon,
+    BookOpenIcon,
+    BuildingOffice2Icon,
+    ChartBarIcon,
+    ClipboardDocumentCheckIcon,
+    Cog6ToothIcon,
+    DocumentTextIcon,
+    ExclamationTriangleIcon,
+    FolderIcon,
+    HomeIcon,
+    MegaphoneIcon,
+    PencilSquareIcon,
+    ShieldCheckIcon,
+    TruckIcon,
+    UserGroupIcon,
+    UsersIcon,
+    WrenchScrewdriverIcon,
+} from '@heroicons/react/24/outline';
+
+/**
+ * Admin console shell.  [UI §2.3, §6]
+ *
+ * Desktop-first, unlike the portal — but the ticket queue and exceptions panel
+ * must work on a phone, because the manager triages from the car (UI §6). So
+ * the sidebar becomes an off-canvas drawer below 640px rather than disappearing.
+ *
+ * The exceptions badge is in the top bar on every screen by design: the things
+ * it counts (a stale reconciliation, a returned payment, an unmatched
+ * remittance) are exactly what goes unnoticed until someone complains.
+ */
+
+/** Groups and order are fixed by UI §2.3 — do not reorder to taste. */
+const NAV_GROUPS = [
+    { label: 'Overview', items: [{ href: '/admin', label: 'Dashboard', icon: HomeIcon }] },
+    {
+        label: 'Portfolio',
+        items: [
+            { href: '/admin/properties', label: 'Properties', icon: BuildingOffice2Icon },
+            { href: '/admin/tenants', label: 'Tenants', icon: UsersIcon },
+            { href: '/admin/leases', label: 'Leases', icon: DocumentTextIcon },
+        ],
+    },
+    {
+        label: 'Money',
+        items: [
+            { href: '/admin/ledger', label: 'Ledger', icon: BookOpenIcon },
+            { href: '/admin/payments', label: 'Payments', icon: BanknotesIcon },
+            { href: '/admin/delinquency', label: 'Delinquency', icon: ExclamationTriangleIcon },
+            { href: '/admin/arrangements', label: 'Arrangements', icon: ClipboardDocumentCheckIcon },
+        ],
+    },
+    {
+        label: 'Operations',
+        items: [
+            { href: '/admin/maintenance', label: 'Maintenance', icon: WrenchScrewdriverIcon },
+            { href: '/admin/documents', label: 'Documents', icon: FolderIcon },
+            { href: '/admin/signatures', label: 'Signatures', icon: PencilSquareIcon },
+            { href: '/admin/notices', label: 'Notices', icon: MegaphoneIcon },
+        ],
+    },
+    {
+        label: 'Insight',
+        items: [
+            { href: '/admin/reports', label: 'Reports', icon: ChartBarIcon },
+            { href: '/admin/audit', label: 'Audit', icon: ShieldCheckIcon },
+        ],
+    },
+    {
+        label: 'System',
+        items: [
+            { href: '/admin/import', label: 'Import', icon: ArrowUpTrayIcon },
+            { href: '/admin/vendors', label: 'Vendors', icon: TruckIcon },
+            { href: '/admin/users', label: 'Users', icon: UserGroupIcon },
+            { href: '/admin/settings', label: 'Settings', icon: Cog6ToothIcon },
+        ],
+    },
+];
+
+function isActive(url, href) {
+    return href === '/admin' ? url === '/admin' : url.startsWith(href);
+}
+
+/**
+ * @param {boolean} collapsible  When true the labels hide below 1024px, leaving
+ *                               an icon rail (UI §6, tablet). The drawer passes
+ *                               false because it always has room for labels.
+ */
+function SidebarNav({ url, onNavigate, collapsible = false }) {
+    // Labels stay in the DOM and become sr-only rather than disappearing, so the
+    // icon rail is still navigable by screen reader and every link keeps an
+    // accessible name.
+    const labelClasses = collapsible ? 'sr-only lg:not-sr-only' : '';
+    const groupClasses = collapsible ? 'hidden lg:block' : '';
+
+    return (
+        <nav aria-label="Admin" className="space-y-6 p-2 lg:p-4">
+            {NAV_GROUPS.map((group) => (
+                <div key={group.label}>
+                    <p
+                        className={`mb-1 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500 ${groupClasses}`}
+                    >
+                        {group.label}
+                    </p>
+                    <ul className="space-y-0.5">
+                        {group.items.map((item) => {
+                            const active = isActive(url, item.href);
+                            const Icon = item.icon;
+
+                            return (
+                                <li key={item.href}>
+                                    <Link
+                                        href={item.href}
+                                        onClick={onNavigate}
+                                        aria-current={active ? 'page' : undefined}
+                                        title={collapsible ? item.label : undefined}
+                                        className={`flex min-h-touch items-center justify-center gap-3 rounded-md px-2 py-2 text-base focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600 lg:justify-start ${
+                                            active
+                                                ? 'bg-brand-50 font-semibold text-brand-700'
+                                                : 'text-gray-700 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <Icon aria-hidden="true" className="h-5 w-5 shrink-0" />
+                                        <span className={labelClasses}>{item.label}</span>
+                                    </Link>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+            ))}
+        </nav>
+    );
+}
+
+export default function AdminLayout({ header, exceptionCount = 0, children }) {
+    const { url } = usePage();
+    const [drawerOpen, setDrawerOpen] = useState(false);
+
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <header className="sticky top-0 z-30 border-b border-gray-200 bg-white">
+                <div className="flex items-center gap-3 px-4 py-3">
+                    <button
+                        type="button"
+                        onClick={() => setDrawerOpen(true)}
+                        aria-label="Open navigation"
+                        aria-expanded={drawerOpen}
+                        className="min-h-touch min-w-touch rounded-md text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600 sm:hidden"
+                    >
+                        <span aria-hidden="true" className="text-xl">
+                            ☰
+                        </span>
+                    </button>
+
+                    <Link href="/admin" className="text-lg font-semibold text-gray-900">
+                        HUPM
+                    </Link>
+
+                    <div className="ml-auto flex items-center gap-3">
+                        <label htmlFor="admin-search" className="sr-only">
+                            Search tenants, units and ticket numbers
+                        </label>
+                        <input
+                            id="admin-search"
+                            type="search"
+                            placeholder="Search…"
+                            className="hidden w-64 rounded-md border-gray-300 text-base md:block"
+                        />
+
+                        <Link
+                            href="/admin/exceptions"
+                            className="relative flex min-h-touch min-w-touch items-center justify-center rounded-md px-2 text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+                        >
+                            {/* Count is in the accessible name, not only in a
+                                coloured dot (UI §9). */}
+                            <span aria-hidden="true" className="text-lg">
+                                ⚑
+                            </span>
+                            <span className="sr-only">
+                                {exceptionCount} item{exceptionCount === 1 ? '' : 's'} need attention
+                            </span>
+                            {exceptionCount > 0 && (
+                                <span
+                                    aria-hidden="true"
+                                    className="absolute -right-0.5 -top-0.5 rounded-full bg-overdue-fg px-1.5 text-xs font-semibold text-white"
+                                >
+                                    {exceptionCount}
+                                </span>
+                            )}
+                        </Link>
+                    </div>
+                </div>
+            </header>
+
+            <div className="flex">
+                {/* Tablet: a 64px icon rail. Desktop: the full sidebar (UI §6).
+                    One element rather than two, so the two presentations cannot
+                    drift apart. */}
+                <aside className="hidden w-16 shrink-0 border-r border-gray-200 bg-white sm:block lg:w-60">
+                    <SidebarNav url={url} collapsible />
+                </aside>
+
+                {/* Mobile: off-canvas drawer. */}
+                {drawerOpen && (
+                    <div className="fixed inset-0 z-40 sm:hidden">
+                        <button
+                            type="button"
+                            aria-label="Close navigation"
+                            onClick={() => setDrawerOpen(false)}
+                            className="absolute inset-0 h-full w-full bg-black/50"
+                        />
+                        <div className="absolute inset-y-0 left-0 w-72 overflow-y-auto bg-white shadow-xl">
+                            <SidebarNav url={url} onNavigate={() => setDrawerOpen(false)} />
+                        </div>
+                    </div>
+                )}
+
+                <main className="min-w-0 flex-1 px-4 py-6">
+                    {header && <h1 className="mb-4 text-xl font-semibold text-gray-900">{header}</h1>}
+                    {children}
+                </main>
+            </div>
+        </div>
+    );
+}

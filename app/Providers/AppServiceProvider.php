@@ -6,6 +6,7 @@ use App\Support\AuditLogger;
 use App\Support\BusinessCalendar;
 use App\Support\Settings;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 
@@ -26,6 +27,24 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Vite::prefetch(concurrency: 3);
+
+        // Company details for the public Blade layout (UI §2.1). A composer
+        // rather than View::share so the query runs only when a public page is
+        // actually rendered — not on every console command, and not during
+        // migrate:fresh when the settings table may not exist yet.
+        View::composer(['public.*', 'errors.*'], function ($view): void {
+            $settings = $this->app->make(Settings::class);
+
+            $view->with('company', [
+                'name' => $settings->string('company.name', config('app.name')),
+                'phone' => $settings->string('company.phone'),
+                'address' => $settings->string('company.address'),
+                // [GATE] Unset until the client supplies it. WP-35 blocks
+                // go-live while empty — the layout says so rather than
+                // rendering a blank space where a number should be.
+                'emergency_phone' => $settings->string('company.emergency_phone'),
+            ]);
+        });
 
         // Fail loudly on a mass-assignment attempt against a guarded attribute
         // instead of silently discarding it. Financial models are fully guarded

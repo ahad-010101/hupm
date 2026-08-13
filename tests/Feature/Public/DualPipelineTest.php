@@ -21,7 +21,7 @@ it('renders the public home page in Blade without Inertia', function () {
     $response = $this->get('/');
 
     $response->assertOk();
-    $response->assertSee('Resident Login');
+    $response->assertSee('Tenant Login'); // UI §2.1 wording
     $response->assertDontSee('data-page', escape: false);
 });
 
