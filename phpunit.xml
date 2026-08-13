@@ -11,6 +11,11 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <!-- Structural guarantees: sole ledger writer, no float on money paths,
+             no balance column, no bank-data columns, case-correct filenames. -->
+        <testsuite name="Architecture">
+            <directory>tests/Architecture</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
@@ -23,9 +28,27 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
+
+        <!-- [WP-01] Tests run against MySQL, not SQLite in-memory.
+             This is not a preference. Critical invariants in this system are
+             enforced by the database itself, and SQLite cannot express them:
+               - D-03's leases.active_unit_key is a STORED generated column
+                 using IF(), which SQLite has no function for — the schema does
+                 not even build there.
+               - D-01 relies on MySQL permitting unlimited NULLs in a UNIQUE
+                 index.
+               - ENUM, DECIMAL semantics and FK RESTRICT behaviour all differ.
+             Testing on SQLite would mean the constraints that protect the
+             ledger are never exercised, while every test still passes. The cost
+             is slower tests; the alternative is false confidence about money. -->
+        <env name="DB_CONNECTION" value="mysql"/>
+        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_PORT" value="3306"/>
+        <env name="DB_DATABASE" value="hupm_test"/>
+        <env name="DB_USERNAME" value="root"/>
+        <env name="DB_PASSWORD" value=""/>
         <env name="DB_URL" value=""/>
+
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

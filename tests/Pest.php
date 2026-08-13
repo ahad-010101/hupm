@@ -15,6 +15,11 @@ pest()->extend(Tests\TestCase::class)
  // ->use(Illuminate\Foundation\Testing\RefreshDatabase::class)
     ->in('Feature');
 
+// Architecture tests need the application booted too: the schema guarantees in
+// SchemaTest query the live database through the DB facade. Tests that only
+// touch the filesystem (CaseSensitivityTest) are unaffected by this.
+pest()->extend(Tests\TestCase::class)->in('Architecture');
+
 /*
 |--------------------------------------------------------------------------
 | Expectations
