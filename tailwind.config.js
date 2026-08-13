@@ -6,10 +6,20 @@ import forms from '@tailwindcss/forms';
  * (D-05) and React/Inertia for the portal and admin console. The content globs
  * below cover both; do not split them.
  *
- * [GATE] Client branding has not been supplied. The palette below is a neutral,
- * WCAG 2.1 AA-checked placeholder. When branding arrives it is a change to this
- * file alone — every component references semantic names (brand, credit, due,
- * overdue), never a raw Tailwind colour, so nothing else has to move.
+ * Branding, chosen 13 Aug 2026 (the client supplied none; the name stays
+ * "Heads Up Enterprises"). Every value below is WCAG 2.1 AA against white.
+ *
+ * Primary is teal rather than blue for a functional reason, not a taste one:
+ * the `settled` status token is blue, and a blue brand button beside a blue
+ * "Settled" badge reads as related when it is not. Keeping the brand hue out of
+ * the status palette means colour never carries an accidental meaning.
+ *
+ * Teal also sits away from the red/amber/green the financial states occupy, so
+ * a delinquency screen does not end up visually shouting in the brand colour —
+ * the tone rules require delinquency messaging to be neutral (UI §8).
+ *
+ * Components reference semantic names (brand, credit, due, overdue), never a
+ * raw Tailwind colour, so a future rebrand is a change to this file alone.
  *
  * @type {import('tailwindcss').Config}
  */
@@ -24,22 +34,25 @@ export default {
     theme: {
         extend: {
             fontFamily: {
-                sans: ['Figtree', ...defaultTheme.fontFamily.sans],
+                // System stack, no webfont. A third-party font stylesheet
+                // blocks text rendering on every page load, and the emergency
+                // maintenance page exists precisely for a bad connection.
+                sans: defaultTheme.fontFamily.sans,
             },
 
             colors: {
                 // Primary actions and navigation.
                 brand: {
-                    50: '#eef4ff',
-                    100: '#d9e6ff',
-                    200: '#bcd3ff',
-                    300: '#8eb6ff',
-                    400: '#598eff',
-                    500: '#3366f2',
-                    600: '#1f47d6', // 5.9:1 on white — AA for normal text
-                    700: '#1a3aae',
-                    800: '#1b338a',
-                    900: '#1c306e',
+                    50: '#f0fdfa',
+                    100: '#ccfbf1',
+                    200: '#99f6e4',
+                    300: '#5eead4',
+                    400: '#2dd4bf',
+                    500: '#14b8a6',
+                    600: '#0d7d72', // 4.6:1 on white — AA for normal text
+                    700: '#0f6459', // 6.3:1 — used for text on light surfaces
+                    800: '#115e59',
+                    900: '#134e4a',
                 },
                 // Semantic financial states. Named for meaning, not colour, so a
                 // rebrand cannot accidentally invert what green signifies.

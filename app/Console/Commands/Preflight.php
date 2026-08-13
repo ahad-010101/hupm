@@ -43,7 +43,9 @@ class Preflight extends Command
             'why' => 'Payment gateway (WP-13) — no workaround if blocked',
             'required' => true,
         ],
-        'api.postmarkapp.com' => [
+        // [D-17] Resend, not Postmark/SendGrid. The constraint the specs were
+        // expressing is "HTTPS API, not SMTP" — this host blocks the SMTP ports.
+        'api.resend.com' => [
             'why' => 'Transactional email (WP-03) — SMTP ports are blocked on this host',
             'required' => true,
         ],
@@ -64,6 +66,7 @@ class Preflight extends Command
         $this->checkExtensions();
         $this->checkIni();
         $this->checkDatabase();
+        $this->checkMail();
         $this->checkFilesystem();
         $this->checkOutbound();
         $this->checkScheduler();
@@ -150,6 +153,36 @@ class Preflight extends Command
         } catch (Throwable $e) {
             $this->record('MySQL connectivity', 'FAILED: '.$e->getMessage(), false);
         }
+    }
+
+    /**
+     * The mail transport, and the webhook secret it makes mandatory.
+     *
+     * resend/resend-laravel registers POST /resend/webhook unconditionally and
+     * verifies signatures only when `resend.webhook.secret` is set — a blank
+     * secret disables the check, not the route. That fails open, so an empty
+     * secret is treated here as a hard failure rather than a warning.
+     */
+    private function checkMail(): void
+    {
+        $mailer = config('mail.default');
+        $this->record('mail transport', (string) $mailer, true, required: false);
+
+        if ($mailer !== 'resend') {
+            return;
+        }
+
+        $apiKey = (string) config('services.resend.key');
+        $this->record('RESEND_API_KEY set', $apiKey === '' ? 'MISSING' : 'present', $apiKey !== '');
+
+        $secret = (string) config('resend.webhook.secret');
+        $this->record(
+            'RESEND_WEBHOOK_SECRET set',
+            $secret === ''
+                ? 'MISSING — the package leaves POST /resend/webhook unauthenticated'
+                : 'present',
+            $secret !== '',
+        );
     }
 
     private function checkFilesystem(): void

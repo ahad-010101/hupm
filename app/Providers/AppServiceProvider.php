@@ -32,7 +32,7 @@ class AppServiceProvider extends ServiceProvider
         // rather than View::share so the query runs only when a public page is
         // actually rendered — not on every console command, and not during
         // migrate:fresh when the settings table may not exist yet.
-        View::composer(['public.*', 'errors.*'], function ($view): void {
+        View::composer(['public.*', 'errors.*', 'mail.*'], function ($view): void {
             $settings = $this->app->make(Settings::class);
 
             $view->with('company', [

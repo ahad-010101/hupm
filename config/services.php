@@ -20,6 +20,9 @@ return [
 
     'resend' => [
         'key' => env('RESEND_API_KEY'),
+        // Svix signing secret for delivery webhooks. Absent means the webhook
+        // endpoint refuses every request rather than accepting unsigned ones.
+        'webhook_secret' => env('RESEND_WEBHOOK_SECRET'),
     ],
 
     'ses' => [

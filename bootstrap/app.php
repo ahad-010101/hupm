@@ -20,6 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
         then: function (): void {
             Route::middleware('public')
                 ->group(base_path('routes/public.php'));
+
+            // Webhooks carry no cookie and cannot supply a CSRF token; their
+            // authenticity is the request signature. They get no middleware at
+            // all rather than CSRF exemptions bolted onto the `web` group,
+            // which would weaken every other route to accommodate two.
+            Route::group([], base_path('routes/webhooks.php'));
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

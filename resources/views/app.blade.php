@@ -6,9 +6,12 @@
 
         <title inertia>{{ config('app.name', 'Laravel') }}</title>
 
-        <!-- Fonts -->
-        <link rel="preconnect" href="https://fonts.bunny.net">
-        <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
+        {{-- No webfont. Breeze shipped a fonts.bunny.net link; it was removed
+             deliberately. A third-party stylesheet blocks text rendering on
+             every page load, and this application is used on poor mobile
+             connections at bad moments. It also sent every tenant's browser to
+             an external host for no benefit the system needs. The system font
+             stack renders instantly and looks native on each device. --}}
 
         <!-- Scripts -->
         @routes
