@@ -5,34 +5,50 @@ namespace App\Http\Middleware;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
+/**
+ * Props shared with every Inertia page.
+ *
+ * This runs on the portal, admin and owner pipelines only. It is deliberately
+ * absent from the public middleware group (D-05), which is what makes AC-PUB-01
+ * structural: a public response has no shared prop bag, so there is nothing
+ * here that could leak onto one.
+ *
+ * INVARIANT I-4: nothing added here may carry the Housing Authority portion,
+ * because these props reach the tenant portal.
+ */
 class HandleInertiaRequests extends Middleware
 {
-    /**
-     * The root template that is loaded on the first page visit.
-     *
-     * @var string
-     */
     protected $rootView = 'app';
 
-    /**
-     * Determine the current asset version.
-     */
     public function version(Request $request): ?string
     {
         return parent::version($request);
     }
 
-    /**
-     * Define the props that are shared by default.
-     *
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     public function share(Request $request): array
     {
         return [
             ...parent::share($request),
+
             'auth' => [
-                'user' => $request->user(),
+                // An explicit whitelist, not the model. Serialising the whole
+                // user would ship password hashes, tokens and tenant_id to the
+                // browser on every page — $hidden protects some of that, but
+                // naming the fields is the guarantee.
+                'user' => $request->user() ? [
+                    'id' => $request->user()->id,
+                    'name' => $request->user()->name,
+                    'email' => $request->user()->email,
+                    'role' => $request->user()->role,
+                ] : null,
+            ],
+
+            // One-shot messages after a redirect. Split by tone so a page never
+            // has to guess whether a string is good news.
+            'flash' => [
+                'status' => fn () => $request->session()->get('status'),
+                'error' => fn () => $request->session()->get('error'),
             ],
         ];
     }

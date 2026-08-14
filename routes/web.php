@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\Admin\HousingAuthorityController;
+use App\Http\Controllers\Admin\PropertyController;
+use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -34,6 +37,18 @@ Route::middleware('auth')->group(function () {
      */
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
         Route::get('/', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
+
+        // Properties and units (API-ADM-02…04). Units are nested because a unit
+        // number is only unique within its property (AC-REG-01), so the parent
+        // is part of the identity rather than a convenience.
+        Route::resource('properties', PropertyController::class);
+        Route::get('properties/{property}/units/create', [UnitController::class, 'create'])->name('properties.units.create');
+        Route::post('properties/{property}/units', [UnitController::class, 'store'])->name('properties.units.store');
+        Route::get('properties/{property}/units/{unit}/edit', [UnitController::class, 'edit'])->name('properties.units.edit');
+        Route::patch('properties/{property}/units/{unit}', [UnitController::class, 'update'])->name('properties.units.update');
+        Route::delete('properties/{property}/units/{unit}', [UnitController::class, 'destroy'])->name('properties.units.destroy');
+
+        Route::resource('housing-authorities', HousingAuthorityController::class)->except(['show']);
     });
 
     /*
