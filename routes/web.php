@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Admin\HousingAuthorityController;
+use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\PropertyController;
+use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\ProfileController;
@@ -49,6 +51,18 @@ Route::middleware('auth')->group(function () {
         Route::delete('properties/{property}/units/{unit}', [UnitController::class, 'destroy'])->name('properties.units.destroy');
 
         Route::resource('housing-authorities', HousingAuthorityController::class)->except(['show']);
+
+        // Tenants (API-ADM-05…07). The invite action is separate from update
+        // because issuing portal access is a different decision from correcting
+        // a phone number, and it sends email.
+        Route::resource('tenants', TenantController::class);
+        Route::post('tenants/{tenant}/invite', [TenantController::class, 'invite'])->name('tenants.invite');
+
+        // Leases (API-ADM-08…10). Termination is its own action, not a status
+        // dropdown: FR-REG-03 needs an effective date and a reason, and it must
+        // be a deliberate act rather than a field someone edits in passing.
+        Route::resource('leases', LeaseController::class)->except(['show']);
+        Route::post('leases/{lease}/terminate', [LeaseController::class, 'terminate'])->name('leases.terminate');
     });
 
     /*

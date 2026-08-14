@@ -1,0 +1,160 @@
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Domain\Leases\LeaseService;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\LeaseRequest;
+use App\Models\HousingAuthority;
+use App\Models\Lease;
+use App\Models\Tenant;
+use App\Models\Unit;
+use App\Support\BusinessCalendar;
+use Carbon\CarbonImmutable;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
+
+/**
+ * Leases.  [FR-REG-02, FR-REG-03, API-ADM-08…10]
+ */
+class LeaseController extends Controller
+{
+    public function __construct(private readonly LeaseService $leases) {}
+
+    public function index(Request $request): Response
+    {
+        $leases = Lease::query()
+            ->with(['tenant:id,first_name,last_name', 'unit.property:id,name'])
+            ->when($request->string('status')->value(), fn ($q, $s) => $q->where('status', $s))
+            ->when($request->string('search')->trim()->value(), function ($query, string $search) {
+                $query->whereHas('tenant', fn ($q) => $q
+                    ->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%"));
+            })
+            ->orderByDesc('status')
+            ->orderByDesc('start_date')
+            ->paginate(25)
+            ->withQueryString()
+            ->through(fn (Lease $lease) => [
+                'id' => $lease->id,
+                'tenant' => $lease->tenant?->fullName(),
+                'property' => $lease->unit?->property?->name,
+                'unit' => $lease->unit?->unit_number,
+                'status' => $lease->status,
+                'start_date' => $lease->start_date?->toDateString(),
+                'end_date' => $lease->end_date?->toDateString(),
+                'total_contract_rent' => (string) $lease->total_contract_rent,
+                'tenant_portion' => (string) $lease->tenant_portion,
+                'is_subsidised' => $lease->is_subsidised,
+            ]);
+
+        return Inertia::render('Admin/Leases/Index', [
+            'leases' => $leases,
+            'filters' => $request->only(['search', 'status']),
+        ]);
+    }
+
+    public function create(Request $request): Response
+    {
+        return Inertia::render('Admin/Leases/Form', [
+            'lease' => null,
+            'preselectedTenantId' => $request->integer('tenant_id') ?: null,
+            ...$this->formOptions(),
+        ]);
+    }
+
+    public function store(LeaseRequest $request): RedirectResponse
+    {
+        $lease = $this->leases->create($request->attributesForModel());
+
+        return redirect()
+            ->route('admin.leases.edit', $lease)
+            ->with('status', 'Lease created.');
+    }
+
+    public function edit(Lease $lease): Response
+    {
+        return Inertia::render('Admin/Leases/Form', [
+            'lease' => [
+                ...$lease->only([
+                    'id', 'unit_id', 'tenant_id', 'housing_authority_id',
+                    'rent_due_day', 'grace_period_days', 'is_subsidised',
+                    'hap_contract_number', 'utility_responsibility',
+                    'partial_payment_policy', 'partial_requires_approval',
+                    'ledger_review_required', 'status',
+                ]),
+                'start_date' => $lease->start_date?->toDateString(),
+                'end_date' => $lease->end_date?->toDateString(),
+                'partial_policy_expires_on' => $lease->partial_policy_expires_on?->toDateString(),
+                // Money crosses as decimal strings, never numbers (I-10).
+                'total_contract_rent' => (string) $lease->total_contract_rent,
+                'tenant_portion' => (string) $lease->tenant_portion,
+                'ha_portion' => (string) $lease->ha_portion,
+                'late_fee_flat' => (string) $lease->late_fee_flat,
+                'late_fee_daily' => (string) $lease->late_fee_daily,
+                'late_fee_max' => $lease->late_fee_max ? (string) $lease->late_fee_max : '',
+                'returned_payment_fee' => (string) $lease->returned_payment_fee,
+                'security_deposit' => (string) $lease->security_deposit,
+                'partial_minimum_amount' => $lease->partial_minimum_amount ? (string) $lease->partial_minimum_amount : '',
+                // FS §18.4: the version this form was rendered against.
+                'lock_version' => $lease->lockVersion(),
+            ],
+            ...$this->formOptions(),
+        ]);
+    }
+
+    public function update(LeaseRequest $request, Lease $lease): RedirectResponse
+    {
+        $this->leases->update($lease, $request->attributesForModel());
+
+        return redirect()
+            ->route('admin.leases.edit', $lease)
+            ->with('status', 'Changes saved.');
+    }
+
+    /** FR-REG-03. */
+    public function terminate(Request $request, Lease $lease, BusinessCalendar $calendar): RedirectResponse
+    {
+        $validated = $request->validate([
+            'effective_date' => ['required', 'date'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $this->leases->terminate(
+            $lease,
+            CarbonImmutable::parse($validated['effective_date'], $calendar->timezone())->startOfDay(),
+            $validated['reason'] ?? null,
+        );
+
+        return back()->with(
+            'status',
+            'Lease ended. No further charges will post. Any outstanding balance remains on the account.',
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function formOptions(): array
+    {
+        return [
+            'tenants' => Tenant::query()
+                ->where('status', 'active')
+                ->orderBy('last_name')
+                ->get(['id', 'first_name', 'last_name'])
+                ->map(fn ($t) => ['id' => $t->id, 'name' => $t->fullName()]),
+
+            'units' => Unit::query()
+                ->with('property:id,name')
+                ->orderBy('property_id')
+                ->get(['id', 'property_id', 'unit_number', 'status'])
+                ->map(fn ($u) => [
+                    'id' => $u->id,
+                    'label' => "{$u->property?->name} — unit {$u->unit_number}",
+                    'status' => $u->status,
+                ]),
+
+            'authorities' => HousingAuthority::orderBy('name')->get(['id', 'name']),
+        ];
+    }
+}

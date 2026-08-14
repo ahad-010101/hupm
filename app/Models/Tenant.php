@@ -30,11 +30,36 @@ class Tenant extends Model
         'emergency_contact_name',
         'emergency_contact_phone',
         'notes',
+        // Business state, not privilege — `former` simply means moved out. The
+        // account's role and status live on `users` and are never fillable.
+        'status',
     ];
 
     public function user(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    public function users(): HasMany
+    {
+        return $this->hasMany(User::class);
+    }
+
+    public function leases(): HasMany
+    {
+        return $this->hasMany(Lease::class);
+    }
+
+    /** The current tenancy, if there is one. */
+    public function activeLease(): ?Lease
+    {
+        return $this->leases()->where('status', Lease::STATUS_ACTIVE)->first();
+    }
+
+    /** True once a login exists and a password has been set. */
+    public function hasPortalAccess(): bool
+    {
+        return $this->users()->where('status', User::STATUS_ACTIVE)->exists();
     }
 
     public function documents(): HasMany

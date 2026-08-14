@@ -24,6 +24,18 @@ class Lease extends Model
 
     protected $guarded = ['*'];
 
+    /**
+     * Write timestamps with milliseconds.  [D-18, FS §18.4]
+     *
+     * Eloquent's default is 'Y-m-d H:i:s', which truncates on the way into the
+     * column — so widening it to TIMESTAMP(3) alone changes nothing and the
+     * optimistic lock stays blind to two saves in the same second.
+     *
+     * Date-only columns are unaffected: MySQL coerces the time portion away for
+     * DATE, and start_date/end_date are cast to 'date' on the way back out.
+     */
+    protected $dateFormat = 'Y-m-d H:i:s.v';
+
     public const STATUS_DRAFT = 'draft';
 
     public const STATUS_ACTIVE = 'active';
@@ -50,6 +62,18 @@ class Lease extends Model
             'partial_requires_approval' => 'boolean',
             'ledger_review_required' => 'boolean',
         ];
+    }
+
+    /**
+     * The value optimistic locking compares.  [FS §18.4, D-18]
+     *
+     * Millisecond precision, because `toIso8601String()` truncates to whole
+     * seconds and `updated_at` was widened to `TIMESTAMP(3)` precisely so two
+     * saves in the same second are distinguishable.
+     */
+    public function lockVersion(): string
+    {
+        return $this->updated_at?->format('Y-m-d H:i:s.v') ?? '';
     }
 
     public function unit(): BelongsTo
