@@ -13,8 +13,14 @@
              an external host for no benefit the system needs. The system font
              stack renders instantly and looks native on each device. --}}
 
+        {{-- Ziggy's @routes was removed deliberately. It serialises EVERY named
+             route -- including every admin endpoint and its parameter names --
+             into the page source of every response, tenant portal included.
+             That hands a resident a complete map of the admin surface for no
+             benefit: nothing in this application calls route() from
+             JavaScript, because Inertia <Link href> takes a plain path. --}}
+
         <!-- Scripts -->
-        @routes
         @viteReactRefresh
         @vite(['resources/js/app.jsx', "resources/js/Pages/{$page['component']}.jsx"])
         @inertiaHead

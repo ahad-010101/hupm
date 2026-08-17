@@ -4,7 +4,11 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Concerns\Immutable;
+use App\Domain\Ledger\LedgerService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * A row in the single financial table.
@@ -40,5 +44,43 @@ class LedgerEntry extends Model
     protected function mutableAttributes(): array
     {
         return ['status'];
+    }
+
+    public function lease(): BelongsTo
+    {
+        return $this->belongsTo(Lease::class);
+    }
+
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
+    /** The entry this one reverses, if any (AC-LED-08). */
+    public function reverses(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reverses_entry_id');
+    }
+
+    /** The reversal posted against this entry, if one exists. Both stay visible. */
+    public function reversal(): HasOne
+    {
+        return $this->hasOne(self::class, 'reverses_entry_id');
+    }
+
+    public function createdBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /** BR-05: only these statuses move a balance. */
+    public function scopeAffectingBalance(Builder $query): Builder
+    {
+        return $query->whereIn('status', LedgerService::BALANCE_AFFECTING);
+    }
+
+    public function affectsBalance(): bool
+    {
+        return in_array($this->status, LedgerService::BALANCE_AFFECTING, true);
     }
 }

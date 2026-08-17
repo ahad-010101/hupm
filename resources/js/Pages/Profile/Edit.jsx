@@ -1,39 +1,42 @@
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
+import AdminLayout from '@/Layouts/AdminLayout';
+import OwnerLayout from '@/Layouts/OwnerLayout';
+import PortalLayout from '@/Layouts/PortalLayout';
 import DeleteUserForm from './Partials/DeleteUserForm';
 import UpdatePasswordForm from './Partials/UpdatePasswordForm';
 import UpdateProfileInformationForm from './Partials/UpdateProfileInformationForm';
 
+/**
+ * Account settings.
+ *
+ * Renders inside whichever shell the signed-in role belongs to. It previously
+ * used Breeze's AuthenticatedLayout, which was deleted: that layout linked to
+ * `route('dashboard')`, a route removed in WP-04 when each role gained its own
+ * home, so the page was already broken for every role.
+ */
+const LAYOUTS = { admin: AdminLayout, owner: OwnerLayout, tenant: PortalLayout };
+
 export default function Edit({ mustVerifyEmail, status }) {
+    const { auth } = usePage().props;
+    const Layout = LAYOUTS[auth?.user?.role] ?? PortalLayout;
+
     return (
-        <AuthenticatedLayout
-            header={
-                <h2 className="text-xl font-semibold leading-tight text-gray-800">
-                    Profile
-                </h2>
-            }
-        >
-            <Head title="Profile" />
+        <Layout header="Your account settings">
+            <Head title="Account settings" />
 
-            <div className="py-12">
-                <div className="mx-auto max-w-7xl space-y-6 sm:px-6 lg:px-8">
-                    <div className="bg-white p-4 shadow sm:rounded-lg sm:p-8">
-                        <UpdateProfileInformationForm
-                            mustVerifyEmail={mustVerifyEmail}
-                            status={status}
-                            className="max-w-xl"
-                        />
-                    </div>
+            <div className="max-w-2xl space-y-6">
+                <section className="rounded-lg border border-gray-200 bg-white p-6">
+                    <UpdateProfileInformationForm mustVerifyEmail={mustVerifyEmail} status={status} />
+                </section>
 
-                    <div className="bg-white p-4 shadow sm:rounded-lg sm:p-8">
-                        <UpdatePasswordForm className="max-w-xl" />
-                    </div>
+                <section className="rounded-lg border border-gray-200 bg-white p-6">
+                    <UpdatePasswordForm />
+                </section>
 
-                    <div className="bg-white p-4 shadow sm:rounded-lg sm:p-8">
-                        <DeleteUserForm className="max-w-xl" />
-                    </div>
-                </div>
+                <section className="rounded-lg border border-gray-200 bg-white p-6">
+                    <DeleteUserForm />
+                </section>
             </div>
-        </AuthenticatedLayout>
+        </Layout>
     );
 }

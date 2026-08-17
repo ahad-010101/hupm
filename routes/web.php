@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
+use App\Http\Controllers\Admin\LedgerController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
@@ -30,7 +31,17 @@ Route::middleware('auth')->group(function () {
      | Tenant portal
      */
     Route::middleware('role:tenant')->prefix('portal')->name('portal.')->group(function () {
-        Route::get('/', fn () => Inertia::render('Portal/Dashboard'))->name('dashboard');
+        // I-4 / AC-LED-02: the balance here is the TENANT portion only. The
+        // Housing Authority figure must not appear in the props at all — not
+        // hidden by CSS, not filtered in the component, simply absent.
+        Route::get('/', function (App\Domain\Ledger\BalanceCalculator $balances) {
+            $tenantId = request()->user()->tenant_id;
+
+            return Inertia::render('Portal/Dashboard', [
+                'balance' => $tenantId ? (string) $balances->tenantBalance($tenantId) : null,
+                'pending' => $tenantId ? (string) $balances->pendingPayments($tenantId) : null,
+            ]);
+        })->name('dashboard');
         Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
         Route::get('/documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
     });
@@ -62,6 +73,14 @@ Route::middleware('auth')->group(function () {
         // a phone number, and it sends email.
         Route::resource('tenants', TenantController::class);
         Route::post('tenants/{tenant}/invite', [TenantController::class, 'invite'])->name('tenants.invite');
+
+        // Ledger (WP-09 engine, WP-12 view pulled forward by D-16). There is
+        // deliberately no PUT/PATCH/DELETE here: corrections are reversing
+        // entries, never edits (BR-04, AC-LED-01).
+        Route::get('ledger', [LedgerController::class, 'index'])->name('ledger.index');
+        Route::get('ledger/{tenant}', [LedgerController::class, 'show'])->name('ledger.show');
+        Route::post('ledger/{tenant}/adjustments', [LedgerController::class, 'adjust'])->name('ledger.adjust');
+        Route::post('ledger/{tenant}/entries/{entry}/reverse', [LedgerController::class, 'reverse'])->name('ledger.reverse');
 
         // Leases (API-ADM-08…10). Termination is its own action, not a status
         // dropdown: FR-REG-03 needs an effective date and a reason, and it must
