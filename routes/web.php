@@ -41,8 +41,9 @@ Route::middleware('auth')->group(function () {
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
         Route::get('/', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
 
-        // Address reference data for the property form (D-19).
-        Route::get('address/subdivisions', AddressLookupController::class)->name('address.subdivisions');
+        // Cascading address dropdowns for the property form (D-19).
+        Route::get('address/states', [AddressLookupController::class, 'states'])->name('address.states');
+        Route::get('address/cities', [AddressLookupController::class, 'cities'])->name('address.cities');
 
         // Properties and units (API-ADM-02…04). Units are nested because a unit
         // number is only unique within its property (AC-REG-01), so the parent

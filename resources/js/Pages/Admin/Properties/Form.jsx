@@ -7,59 +7,76 @@ import Alert from '@/Components/Alert';
 /**
  * Property create/edit.  [FR-REG-01, AC-REG-02, D-19]
  *
- * The address section follows the selected country rather than assuming the
- * United States: the third line is called "State" in the US, "Province" in
- * Canada and "Prefecture" in Japan, and it is a dropdown where the country has
- * a fixed list and a text box where it does not (the UK, for instance).
- *
- * Subdivisions for the initial country arrive with the page. Changing the
- * country fetches the new list — the only client-side fetch in the application,
- * because shipping all 256 countries' subdivisions with every form would be
- * megabytes to save one small request.
+ * Country → state → city, each disabled until the one above it is chosen, then
+ * the address lines and postal code. States and cities are fetched as the
+ * selection narrows: the full city list is 150,000 rows, so shipping it to the
+ * browser is not an option.
  */
-export default function Form({ property, countries, subdivisions: initialSubdivisions, addressFormat }) {
+export default function Form({ property, countries, states: initialStates, cities: initialCities, selectedStateId }) {
     const editing = Boolean(property);
 
-    const [subdivisions, setSubdivisions] = useState(initialSubdivisions ?? []);
-    const [format, setFormat] = useState(addressFormat);
-    const [loadingCountry, setLoadingCountry] = useState(false);
+    const [states, setStates] = useState(initialStates ?? []);
+    const [cities, setCities] = useState(initialCities ?? []);
+    const [stateId, setStateId] = useState(selectedStateId ?? '');
+    const [loading, setLoading] = useState(null); // 'states' | 'cities' | null
 
     const { data, setData, post, patch, processing, errors } = useForm({
         name: property?.name ?? '',
         country_code: property?.country_code ?? 'US',
+        state: property?.state ?? '',
+        city: property?.city ?? '',
         street_address: property?.street_address ?? '',
         address_line_2: property?.address_line_2 ?? '',
-        city: property?.city ?? '',
-        state: property?.state ?? 'GA',
         postal_code: property?.postal_code ?? '',
         county: property?.county ?? '',
         notes: property?.notes ?? '',
     });
 
-    const changeCountry = async (code) => {
-        setData((current) => ({ ...current, country_code: code, state: '' }));
-        setLoadingCountry(true);
+    const load = async (url) => {
+        const response = await fetch(url, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        });
 
-        try {
-            const response = await fetch(`/admin/address/subdivisions?country=${code}`, {
-                headers: { Accept: 'application/json' },
-                credentials: 'same-origin',
-            });
+        return response.ok ? response.json() : null;
+    };
 
-            if (response.ok) {
-                const payload = await response.json();
-                setSubdivisions(payload.subdivisions);
-                setFormat(payload.format);
-            }
-        } finally {
-            setLoadingCountry(false);
-        }
+    const onCountryChange = async (code) => {
+        // Clearing the levels below is the point of a cascade: leaving
+        // "Ontario" selected under the United States is how bad data is stored.
+        setData((current) => ({ ...current, country_code: code, state: '', city: '' }));
+        setStates([]);
+        setCities([]);
+        setStateId('');
+
+        setLoading('states');
+        const payload = await load(`/admin/address/states?country=${code}`);
+        setStates(payload?.states ?? []);
+        setLoading(null);
+    };
+
+    const onStateChange = async (id) => {
+        const chosen = states.find((s) => String(s.id) === String(id));
+
+        setStateId(id);
+        setData((current) => ({ ...current, state: chosen?.name ?? '', city: '' }));
+        setCities([]);
+
+        if (!id) return;
+
+        setLoading('cities');
+        const payload = await load(`/admin/address/cities?state=${id}`);
+        setCities(payload?.cities ?? []);
+        setLoading(null);
     };
 
     const submit = (e) => {
         e.preventDefault();
         editing ? patch(`/admin/properties/${property.id}`) : post('/admin/properties');
     };
+
+    const selectClasses =
+        'block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600 disabled:bg-gray-100 disabled:text-gray-500';
 
     return (
         <AdminLayout header={editing ? `Edit ${property.name}` : 'Add property'}>
@@ -78,21 +95,64 @@ export default function Form({ property, countries, subdivisions: initialSubdivi
                 <fieldset className="mb-4">
                     <legend className="mb-2 text-lg font-semibold text-gray-900">Address</legend>
 
-                    <FormField label="Country" error={errors.country_code} required>
-                        <select
-                            value={data.country_code}
-                            onChange={(e) => changeCountry(e.target.value)}
-                            className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
-                        >
-                            {countries.map((c) => (
-                                <option key={c.code} value={c.code}>{c.name}</option>
-                            ))}
-                        </select>
-                    </FormField>
+                    <div className="grid gap-x-4 sm:grid-cols-3">
+                        <FormField label="Country" error={errors.country_code} required>
+                            <select
+                                value={data.country_code}
+                                onChange={(e) => onCountryChange(e.target.value)}
+                                className={selectClasses}
+                            >
+                                <option value="">Choose a country…</option>
+                                {countries.map((c) => (
+                                    <option key={c.iso2} value={c.iso2}>{c.name}</option>
+                                ))}
+                            </select>
+                        </FormField>
 
-                    {data.country_code !== 'US' && (
-                        // The consequence has to be visible at the moment of the
-                        // choice, not discovered when the alerts never arrive.
+                        <FormField label="State / Province" error={errors.state} required>
+                            <select
+                                value={stateId}
+                                onChange={(e) => onStateChange(e.target.value)}
+                                disabled={!data.country_code || loading === 'states'}
+                                className={selectClasses}
+                            >
+                                <option value="">
+                                    {!data.country_code
+                                        ? 'Choose a country first'
+                                        : loading === 'states'
+                                          ? 'Loading…'
+                                          : 'Choose a state / province…'}
+                                </option>
+                                {states.map((s) => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </select>
+                        </FormField>
+
+                        <FormField label="City" error={errors.city} required>
+                            <select
+                                value={data.city}
+                                onChange={(e) => setData('city', e.target.value)}
+                                disabled={!stateId || loading === 'cities'}
+                                className={selectClasses}
+                            >
+                                <option value="">
+                                    {!stateId
+                                        ? 'Choose a state first'
+                                        : loading === 'cities'
+                                          ? 'Loading…'
+                                          : 'Choose a city…'}
+                                </option>
+                                {cities.map((c) => (
+                                    <option key={c.id} value={c.name}>{c.name}</option>
+                                ))}
+                            </select>
+                        </FormField>
+                    </div>
+
+                    {data.country_code && data.country_code !== 'US' && (
+                        // Said at the moment of the choice rather than
+                        // discovered when the alerts never arrive.
                         <Alert tone="warning" className="mb-4" title="Weather alerts are US only">
                             The National Weather Service covers the United States, so residents at this
                             property will not receive automated weather alerts.
@@ -100,7 +160,7 @@ export default function Form({ property, countries, subdivisions: initialSubdivi
                     )}
 
                     <FormField
-                        label="Address line 1"
+                        label="Address"
                         value={data.street_address}
                         onChange={(e) => setData('street_address', e.target.value)}
                         error={errors.street_address}
@@ -121,73 +181,27 @@ export default function Form({ property, countries, subdivisions: initialSubdivi
 
                     <div className="grid gap-x-4 sm:grid-cols-2">
                         <FormField
-                            label={format?.locality_label ?? 'City'}
-                            value={data.city}
-                            onChange={(e) => setData('city', e.target.value)}
-                            error={errors.city}
-                            maxLength={100}
-                            autoComplete="address-level2"
-                            required
-                        />
-
-                        <FormField label="County" error={errors.county} maxLength={100} hint="Optional.">
-                            <input
-                                type="text"
-                                value={data.county}
-                                onChange={(e) => setData('county', e.target.value)}
-                                maxLength={100}
-                                className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
-                            />
-                        </FormField>
-
-                        {/* A select where the country has a fixed list, a text
-                            box where it does not — an empty dropdown is worse
-                            than no dropdown. */}
-                        <FormField
-                            label={format?.administrative_area_label ?? 'State or province'}
-                            error={errors.state}
-                            required={Boolean(format?.has_subdivisions)}
-                        >
-                            {format?.has_subdivisions ? (
-                                <select
-                                    value={data.state}
-                                    onChange={(e) => setData('state', e.target.value)}
-                                    disabled={loadingCountry}
-                                    autoComplete="address-level1"
-                                    className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600 disabled:bg-gray-100"
-                                >
-                                    <option value="">
-                                        {loadingCountry ? 'Loading…' : `Choose a ${(format?.administrative_area_label ?? 'region').toLowerCase()}…`}
-                                    </option>
-                                    {subdivisions.map((s) => (
-                                        <option key={s.code} value={s.code}>{s.name}</option>
-                                    ))}
-                                </select>
-                            ) : (
-                                <input
-                                    type="text"
-                                    value={data.state}
-                                    onChange={(e) => setData('state', e.target.value)}
-                                    maxLength={64}
-                                    autoComplete="address-level1"
-                                    className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
-                                />
-                            )}
-                        </FormField>
-
-                        <FormField
-                            label={`${format?.postal_code_label ?? 'Postal'} code`}
+                            label="Postal code"
                             value={data.postal_code}
                             onChange={(e) => setData('postal_code', e.target.value)}
                             error={errors.postal_code}
                             maxLength={16}
                             autoComplete="postal-code"
-                            required={Boolean(format?.postal_code_required)}
                             hint={
                                 data.country_code === 'US'
                                     ? 'Five digits. This determines which weather alerts residents receive.'
                                     : undefined
                             }
+                            required
+                        />
+
+                        <FormField
+                            label="County"
+                            value={data.county}
+                            onChange={(e) => setData('county', e.target.value)}
+                            error={errors.county}
+                            maxLength={100}
+                            hint="Optional."
                         />
                     </div>
                 </fieldset>

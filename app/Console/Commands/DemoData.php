@@ -5,8 +5,10 @@ namespace App\Console\Commands;
 use Database\Seeders\AdminUserSeeder;
 use Database\Seeders\DemoDataSeeder;
 use Database\Seeders\SettingsSeeder;
+use Database\Seeders\WorldSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 
 /**
  * One command to get a working local system.  [WP-01D]
@@ -31,6 +33,14 @@ class DemoData extends Command
         if ($this->option('fresh')) {
             $this->components->info('Rebuilding the database from scratch.');
             Artisan::call('migrate:fresh', ['--force' => true], $this->output);
+        }
+
+        // Countries, states and cities for the address dropdowns (D-19).
+        // ~30 seconds and 150,000 rows, so only when it is actually missing —
+        // a --fresh rebuild drops it, an ordinary re-seed does not.
+        if (DB::table('countries')->doesntExist()) {
+            $this->components->info('Seeding world address data (this takes about half a minute).');
+            $this->call('db:seed', ['--class' => WorldSeeder::class, '--force' => true]);
         }
 
         $this->callSilently('db:seed', ['--class' => SettingsSeeder::class, '--force' => true]);

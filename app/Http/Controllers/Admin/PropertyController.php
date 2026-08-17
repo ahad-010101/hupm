@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PropertyRequest;
 use App\Models\Property;
-use App\Support\AddressCatalogue;
 use App\Support\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -45,11 +45,11 @@ class PropertyController extends Controller
         ]);
     }
 
-    public function create(AddressCatalogue $addresses): Response
+    public function create(): Response
     {
         return Inertia::render('Admin/Properties/Form', [
             'property' => null,
-            ...$this->addressOptions($addresses, 'US'),
+            ...$this->addressOptions('US', null),
         ]);
     }
 
@@ -80,27 +80,52 @@ class PropertyController extends Controller
         ]);
     }
 
-    public function edit(Property $property, AddressCatalogue $addresses): Response
+    public function edit(Property $property): Response
     {
         return Inertia::render('Admin/Properties/Form', [
             'property' => $property,
-            ...$this->addressOptions($addresses, $property->country_code ?? 'US'),
+            ...$this->addressOptions($property->country_code ?? 'US', $property->state),
         ]);
     }
 
     /**
-     * Country list plus the selected country's subdivisions and labels, so the
-     * form renders correctly on first paint. Changing the country afterwards
-     * fetches from AddressLookupController.
+     * Everything the address cascade needs on first paint: all countries, and
+     * the states and cities for whatever is already selected. Changing a
+     * dropdown afterwards fetches the next level from AddressLookupController.
+     *
+     * Without pre-loading, editing an existing property would briefly show
+     * empty state and city dropdowns over correct stored values.
      *
      * @return array<string, mixed>
      */
-    private function addressOptions(AddressCatalogue $addresses, string $countryCode): array
+    private function addressOptions(string $countryCode, ?string $stateName): array
     {
+        $countries = cache()->rememberForever('address.countries', fn () => DB::table('countries')
+            ->orderByRaw("FIELD(iso2, 'US', 'CA') DESC") // the ones we operate in, first
+            ->orderBy('name')
+            ->get(['iso2', 'name'])
+            ->all());
+
+        $states = cache()->rememberForever("address.states.{$countryCode}", fn () => DB::table('states')
+            ->join('countries', 'countries.id', '=', 'states.country_id')
+            ->where('countries.iso2', $countryCode)
+            ->orderBy('states.name')
+            ->get(['states.id', 'states.name'])
+            ->all());
+
+        $stateId = collect($states)->firstWhere('name', $stateName)?->id;
+
         return [
-            'countries' => $addresses->countries(),
-            'subdivisions' => $addresses->subdivisions($countryCode),
-            'addressFormat' => $addresses->formatFor($countryCode),
+            'countries' => $countries,
+            'states' => $states,
+            'cities' => $stateId
+                ? cache()->rememberForever("address.cities.{$stateId}", fn () => DB::table('cities')
+                    ->where('state_id', $stateId)
+                    ->orderBy('name')
+                    ->get(['id', 'name'])
+                    ->all())
+                : [],
+            'selectedStateId' => $stateId,
         ];
     }
 

@@ -3,35 +3,49 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Support\AddressCatalogue;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Subdivisions and form rules for a country.  [D-19]
+ * States for a country, cities for a state.  [D-19]
+ *
+ * Feeds the cascading country → state → city selects on the property form.
+ * Data comes from nnjeim/world (250 countries, 5,000 states, 150,000 cities),
+ * seeded into the database rather than bundled into JavaScript — the whole
+ * city list is about 10 MB, and there is no CDN in front of this host.
  *
  * The only client-side fetch in the application. TDD §3.3 rules out
- * client-side fetching for PAGE LOADS, and this is not one — it answers "what
- * does this country's address form look like" when the country changes, and
- * shipping the subdivisions of all 256 countries with every property form
- * would be several megabytes to avoid one small request.
+ * client-side fetching for PAGE LOADS; this is not one.
  *
- * Read-only reference data, but still behind admin auth: there is no reason for
- * an unauthenticated endpoint to exist.
+ * Cached forever: the list of Georgian cities does not change between deploys.
  */
 class AddressLookupController extends Controller
 {
-    public function __invoke(Request $request, AddressCatalogue $addresses): JsonResponse
+    public function states(Request $request): JsonResponse
     {
-        $country = strtoupper((string) $request->string('country'));
+        $countryCode = strtoupper((string) $request->string('country'));
 
-        if (! $addresses->isValidCountry($country)) {
-            return response()->json(['message' => 'Unknown country.'], 422);
-        }
+        $states = cache()->rememberForever("address.states.{$countryCode}", fn () => DB::table('states')
+            ->join('countries', 'countries.id', '=', 'states.country_id')
+            ->where('countries.iso2', $countryCode)
+            ->orderBy('states.name')
+            ->get(['states.id', 'states.name'])
+            ->all());
 
-        return response()->json([
-            'subdivisions' => $addresses->subdivisions($country),
-            'format' => $addresses->formatFor($country),
-        ]);
+        return response()->json(['states' => $states]);
+    }
+
+    public function cities(Request $request): JsonResponse
+    {
+        $stateId = $request->integer('state');
+
+        $cities = cache()->rememberForever("address.cities.{$stateId}", fn () => DB::table('cities')
+            ->where('state_id', $stateId)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->all());
+
+        return response()->json(['cities' => $cities]);
     }
 }

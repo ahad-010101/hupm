@@ -22,8 +22,8 @@ class PropertyFactory extends Factory
             // otherwise carry null until it was reloaded.
             'country_code' => 'US',
             'street_address' => fake()->buildingNumber().' '.fake()->streetName(),
-            'city' => fake()->randomElement(['Atlanta', 'Decatur', 'Marietta', 'East Point']),
-            'state' => 'GA',
+            'city' => fake()->randomElement(['Atlanta', 'Decatur', 'Marietta', 'East Point']), // all real Georgia cities in the seeded data
+            'state' => 'Georgia',
             // Real five-digit Georgia ZIPs — ZIP drives weather targeting, so a
             // plausible one keeps WP-21 testable.
             'postal_code' => fake()->randomElement(['30310', '30030', '30060', '30344']),

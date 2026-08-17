@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\DB;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // Country/state/city are validated against the reference tables (D-19).
+    $this->seed(Database\Seeders\TestAddressSeeder::class);
     $this->admin = User::factory()->admin()->create();
 });
 
@@ -23,9 +25,10 @@ function validProperty(array $overrides = []): array
 {
     return array_merge([
         'name' => 'Peachtree House',
-        'street_address' => '145 Peachtree Street',
+        'country_code' => 'US',
+        'state' => 'Georgia',
         'city' => 'Atlanta',
-        'state' => 'GA',
+        'street_address' => '145 Peachtree Street',
         'postal_code' => '30303',
         'county' => 'Fulton',
     ], $overrides);
