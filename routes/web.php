@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\LedgerController;
+use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
@@ -81,6 +82,20 @@ Route::middleware('auth')->group(function () {
         Route::get('ledger/{tenant}', [LedgerController::class, 'show'])->name('ledger.show');
         Route::post('ledger/{tenant}/adjustments', [LedgerController::class, 'adjust'])->name('ledger.adjust');
         Route::post('ledger/{tenant}/entries/{entry}/reverse', [LedgerController::class, 'reverse'])->name('ledger.reverse');
+
+        // Payments (API-ADM-14/15). `record` and `remittance` are declared as
+        // literal segments and there is no `payments/{payment}` route, so
+        // nothing can shadow them.
+        //
+        // No middleware excludes an account in Management Review: admin-recorded
+        // payments work at all times (BR-12, I-12, AC-PAY-15).
+        Route::get('payments', [PaymentController::class, 'index'])->name('payments.index');
+        Route::get('payments/record', [PaymentController::class, 'create'])->name('payments.create');
+        Route::post('payments/record', [PaymentController::class, 'store'])->name('payments.store');
+
+        // [GATE Q-2, R-9] One authority cheque covering many tenants.
+        Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
+        Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
 
         // Leases (API-ADM-08…10). Termination is its own action, not a status
         // dropdown: FR-REG-03 needs an effective date and a reason, and it must

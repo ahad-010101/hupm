@@ -119,6 +119,7 @@ class LedgerService
         ?int $paymentId = null,
         string $status = 'pending',
         ?CarbonImmutable $postedOn = null,
+        ?string $reason = null,
     ): LedgerEntry {
         if (! $amount->isPositive()) {
             throw new InvalidArgumentException('Pass the amount paid as a positive value; the ledger stores it negative.');
@@ -132,6 +133,10 @@ class LedgerService
             'status' => $status,
             'posted_on' => ($postedOn ?? $this->calendar->today())->toDateString(),
             'description' => $description,
+            // An admin's note about an offline payment — "left at the office",
+            // "part of authority batch 44". Context belongs on the row someone
+            // will be reading a year later, not only in the audit log.
+            'reason' => $reason,
             'payment_id' => $paymentId,
         ], 'ledger.payment.posted');
     }
