@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\PostScheduledCharges;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -20,6 +21,21 @@ use Illuminate\Support\Facades\Schedule;
 | kind of host, not an exception.
 |
 */
+
+/*
+ | Charges post before fees, and fees before delinquency evaluation (TDD §8),
+ | so each job sees a settled state. A late fee calculated against a balance
+ | that has not been charged yet is simply wrong, and the ordering is the only
+ | thing preventing it.
+ |
+ | 01:00 in the COMPANY timezone, not UTC (D-07) — otherwise the job decides
+ | "today" is the previous day in Georgia.
+ */
+Schedule::job(new PostScheduledCharges)
+    ->dailyAt('01:00')
+    ->timezone(config('app.business_timezone', 'America/New_York'))
+    ->withoutOverlapping()
+    ->name('post-scheduled-charges');
 
 // Drain the queue once a minute and exit. --max-time=50 keeps it comfortably
 // inside the next minute's tick so two workers never overlap; --stop-when-empty
