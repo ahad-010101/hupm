@@ -33,7 +33,9 @@ export default function Index({ properties, filters = {}, flash = {} }) {
         {
             key: 'address',
             header: 'Address',
-            render: (row) => `${row.street_address}, ${row.city}, ${row.state} ${row.zip}`,
+            render: (row) =>
+                [row.street_address, row.address_line_2, row.city, `${row.state} ${row.postal_code}`.trim(), row.country_code === 'US' ? null : row.country_code]
+                    .filter(Boolean).join(', '),
         },
         { key: 'county', header: 'County', hideOnMobile: true, render: (row) => row.county ?? '—' },
         {
@@ -66,14 +68,14 @@ export default function Index({ properties, filters = {}, flash = {} }) {
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <form onSubmit={submitSearch} className="flex gap-2">
                     <label htmlFor="property-search" className="sr-only">
-                        Search properties by name, address, city or ZIP
+                        Search properties by name, address, city or postal code
                     </label>
                     <input
                         id="property-search"
                         type="search"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Name, address, city or ZIP"
+                        placeholder="Name, address, city or postal code"
                         className="min-h-touch w-full rounded-md border-gray-300 text-base sm:w-72"
                     />
                     <button
@@ -101,7 +103,7 @@ export default function Index({ properties, filters = {}, flash = {} }) {
                         title={filters.search ? 'No properties match that search.' : 'No properties yet.'}
                         description={
                             filters.search
-                                ? 'Try a different name, city or ZIP.'
+                                ? 'Try a different name, city or postal code.'
                                 : 'Add your first property to begin building the portfolio.'
                         }
                     />

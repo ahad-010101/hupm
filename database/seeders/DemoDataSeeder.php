@@ -115,7 +115,7 @@ class DemoDataSeeder extends Seeder
                 'street_address' => $this->faker->buildingNumber().' '.$this->faker->streetName(),
                 'city' => $city,
                 'state' => 'GA',
-                'zip' => $zip,
+                'postal_code' => $zip,
                 'county' => $county,
                 'notes' => null,
                 'created_at' => now(),

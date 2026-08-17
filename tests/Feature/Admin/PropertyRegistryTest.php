@@ -26,7 +26,7 @@ function validProperty(array $overrides = []): array
         'street_address' => '145 Peachtree Street',
         'city' => 'Atlanta',
         'state' => 'GA',
-        'zip' => '30303',
+        'postal_code' => '30303',
         'county' => 'Fulton',
     ], $overrides);
 }
@@ -44,8 +44,8 @@ it('AC-REG-02 rejects a ZIP that is not five digits', function (string $zip) {
     // ZIP drives weather-alert targeting (WP-21). "Close enough" means a
     // resident in a tornado warning never hears about it.
     $this->actingAs($this->admin)
-        ->post('/admin/properties', validProperty(['zip' => $zip]))
-        ->assertSessionHasErrors('zip');
+        ->post('/admin/properties', validProperty(['postal_code' => $zip]))
+        ->assertSessionHasErrors('postal_code');
 
     expect(Property::count())->toBe(0);
 })->with(['', '303', '303033', 'ABCDE', '30303.0', '-30303', '3030 3']);
@@ -54,26 +54,26 @@ it('AC-REG-02 accepts a ZIP with a leading zero', function () {
     // 'digits:5' rather than numeric, precisely so 07001 survives as a string
     // instead of becoming 7001.
     $this->actingAs($this->admin)
-        ->post('/admin/properties', validProperty(['zip' => '07001']))
+        ->post('/admin/properties', validProperty(['postal_code' => '07001']))
         ->assertSessionHasNoErrors();
 
-    expect(Property::first()->zip)->toBe('07001');
+    expect(Property::first()->postal_code)->toBe('07001');
 });
 
 it('explains why the ZIP matters rather than just refusing it', function () {
     // UI §8: every error message says what to do next, and here it also says
     // why the field is not cosmetic.
     $this->actingAs($this->admin)
-        ->post('/admin/properties', validProperty(['zip' => 'nope']));
+        ->post('/admin/properties', validProperty(['postal_code' => 'nope']));
 
-    expect(session('errors')->first('zip'))->toContain('weather alerts');
+    expect(session('errors')->first('postal_code'))->toContain('weather alerts');
 });
 
 it('requires the fields FR-REG-01 names', function (string $field) {
     $this->actingAs($this->admin)
         ->post('/admin/properties', validProperty([$field => '']))
         ->assertSessionHasErrors($field);
-})->with(['name', 'street_address', 'city', 'zip']);
+})->with(['name', 'street_address', 'city', 'postal_code']);
 
 it('enforces the schema field lengths so a save cannot truncate silently', function () {
     $this->actingAs($this->admin)
@@ -213,8 +213,8 @@ it('lists the whole seeded portfolio', function () {
 });
 
 it('searches by name, city and ZIP', function () {
-    Property::factory()->create(['name' => 'Peachtree House', 'city' => 'Atlanta', 'zip' => '30303']);
-    Property::factory()->create(['name' => 'Elm Court', 'city' => 'Decatur', 'zip' => '30030']);
+    Property::factory()->create(['name' => 'Peachtree House', 'city' => 'Atlanta', 'postal_code' => '30303']);
+    Property::factory()->create(['name' => 'Elm Court', 'city' => 'Decatur', 'postal_code' => '30030']);
 
     foreach (['Peachtree' => 1, 'Decatur' => 1, '30303' => 1, 'nothing' => 0] as $term => $expected) {
         $this->actingAs($this->admin)

@@ -189,7 +189,7 @@ function seedLease(): array
         'street_address' => '1 Test St',
         'city' => 'Atlanta',
         'state' => 'GA',
-        'zip' => '30301',
+        'postal_code' => '30301',
         'created_at' => now(),
         'updated_at' => now(),
     ]);

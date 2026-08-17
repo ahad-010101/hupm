@@ -76,7 +76,18 @@ export default function Show({ property, units, flash = {}, errors = {} }) {
                     <div className="flex justify-between gap-4 border-b border-gray-100 py-1">
                         <dt className="text-sm text-gray-600">Address</dt>
                         <dd className="text-base text-right">
-                            {property.street_address}, {property.city}, {property.state} {property.zip}
+                            {[
+                                property.street_address,
+                                property.address_line_2,
+                                property.city,
+                                `${property.state ?? ''} ${property.postal_code ?? ''}`.trim(),
+                                // The country is shown only when it is not the
+                                // US — printing it on every Atlanta address is
+                                // noise, and its absence is the signal.
+                                property.country_code === 'US' ? null : property.country_code,
+                            ]
+                                .filter(Boolean)
+                                .join(', ')}
                         </dd>
                     </div>
                     <div className="flex justify-between gap-4 border-b border-gray-100 py-1">

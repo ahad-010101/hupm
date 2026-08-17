@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\PropertyController;
@@ -39,6 +40,9 @@ Route::middleware('auth')->group(function () {
      */
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
         Route::get('/', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
+
+        // Address reference data for the property form (D-19).
+        Route::get('address/subdivisions', AddressLookupController::class)->name('address.subdivisions');
 
         // Properties and units (API-ADM-02…04). Units are nested because a unit
         // number is only unique within its property (AC-REG-01), so the parent

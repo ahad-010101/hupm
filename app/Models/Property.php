@@ -19,10 +19,12 @@ class Property extends Model
 
     protected $fillable = [
         'name',
+        'country_code',
         'street_address',
+        'address_line_2',
         'city',
         'state',
-        'zip',
+        'postal_code',
         'county',
         'notes',
     ];
@@ -43,8 +45,33 @@ class Property extends Model
         return ! $this->units()->exists();
     }
 
+    /**
+     * A single-line address.
+     *
+     * Country is appended only when it is not the US: printing "United States"
+     * on twenty-five Atlanta addresses is noise, and its absence is the signal
+     * that nothing unusual is going on.
+     */
     public function fullAddress(): string
     {
-        return "{$this->street_address}, {$this->city}, {$this->state} {$this->zip}";
+        $parts = array_filter([
+            $this->street_address,
+            $this->address_line_2,
+            $this->city,
+            trim("{$this->state} {$this->postal_code}"),
+            $this->country_code === 'US' ? null : $this->country_code,
+        ]);
+
+        return implode(', ', $parts);
+    }
+
+    /**
+     * WP-21 polls the National Weather Service, which covers the United States
+     * only. A property outside it has no alerts available — the reason has to
+     * be visible rather than looking like a bug in the job.
+     */
+    public function supportsWeatherAlerts(): bool
+    {
+        return $this->country_code === 'US';
     }
 }

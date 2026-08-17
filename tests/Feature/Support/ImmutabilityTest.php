@@ -27,7 +27,7 @@ function makeLedgerEntry(array $overrides = []): LedgerEntry
 {
     $propertyId = DB::table('properties')->insertGetId([
         'name' => 'P', 'street_address' => '1 St', 'city' => 'Atlanta',
-        'state' => 'GA', 'zip' => '30301', 'created_at' => now(), 'updated_at' => now(),
+        'state' => 'GA', 'postal_code' => '30301', 'created_at' => now(), 'updated_at' => now(),
     ]);
     $unitId = DB::table('units')->insertGetId([
         'property_id' => $propertyId, 'unit_number' => 'A', 'status' => 'occupied',

@@ -1,20 +1,60 @@
+import { useState } from 'react';
 import { Head, Link, useForm } from '@inertiajs/react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import FormField from '@/Components/FormField';
+import Alert from '@/Components/Alert';
 
-/** Property create/edit.  [FR-REG-01, AC-REG-02] */
-export default function Form({ property }) {
+/**
+ * Property create/edit.  [FR-REG-01, AC-REG-02, D-19]
+ *
+ * The address section follows the selected country rather than assuming the
+ * United States: the third line is called "State" in the US, "Province" in
+ * Canada and "Prefecture" in Japan, and it is a dropdown where the country has
+ * a fixed list and a text box where it does not (the UK, for instance).
+ *
+ * Subdivisions for the initial country arrive with the page. Changing the
+ * country fetches the new list — the only client-side fetch in the application,
+ * because shipping all 256 countries' subdivisions with every form would be
+ * megabytes to save one small request.
+ */
+export default function Form({ property, countries, subdivisions: initialSubdivisions, addressFormat }) {
     const editing = Boolean(property);
+
+    const [subdivisions, setSubdivisions] = useState(initialSubdivisions ?? []);
+    const [format, setFormat] = useState(addressFormat);
+    const [loadingCountry, setLoadingCountry] = useState(false);
 
     const { data, setData, post, patch, processing, errors } = useForm({
         name: property?.name ?? '',
+        country_code: property?.country_code ?? 'US',
         street_address: property?.street_address ?? '',
+        address_line_2: property?.address_line_2 ?? '',
         city: property?.city ?? '',
         state: property?.state ?? 'GA',
-        zip: property?.zip ?? '',
+        postal_code: property?.postal_code ?? '',
         county: property?.county ?? '',
         notes: property?.notes ?? '',
     });
+
+    const changeCountry = async (code) => {
+        setData((current) => ({ ...current, country_code: code, state: '' }));
+        setLoadingCountry(true);
+
+        try {
+            const response = await fetch(`/admin/address/subdivisions?country=${code}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            });
+
+            if (response.ok) {
+                const payload = await response.json();
+                setSubdivisions(payload.subdivisions);
+                setFormat(payload.format);
+            }
+        } finally {
+            setLoadingCountry(false);
+        }
+    };
 
     const submit = (e) => {
         e.preventDefault();
@@ -25,7 +65,6 @@ export default function Form({ property }) {
         <AdminLayout header={editing ? `Edit ${property.name}` : 'Add property'}>
             <Head title={editing ? 'Edit property' : 'Add property'} />
 
-            {/* Single column below 1024px, two where it helps (UI §6). */}
             <form onSubmit={submit} noValidate className="max-w-3xl">
                 <FormField
                     label="Property name"
@@ -36,54 +75,122 @@ export default function Form({ property }) {
                     required
                 />
 
-                <FormField
-                    label="Street address"
-                    value={data.street_address}
-                    onChange={(e) => setData('street_address', e.target.value)}
-                    error={errors.street_address}
-                    maxLength={255}
-                    required
-                />
+                <fieldset className="mb-4">
+                    <legend className="mb-2 text-lg font-semibold text-gray-900">Address</legend>
 
-                <div className="grid gap-x-4 sm:grid-cols-2">
+                    <FormField label="Country" error={errors.country_code} required>
+                        <select
+                            value={data.country_code}
+                            onChange={(e) => changeCountry(e.target.value)}
+                            className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
+                        >
+                            {countries.map((c) => (
+                                <option key={c.code} value={c.code}>{c.name}</option>
+                            ))}
+                        </select>
+                    </FormField>
+
+                    {data.country_code !== 'US' && (
+                        // The consequence has to be visible at the moment of the
+                        // choice, not discovered when the alerts never arrive.
+                        <Alert tone="warning" className="mb-4" title="Weather alerts are US only">
+                            The National Weather Service covers the United States, so residents at this
+                            property will not receive automated weather alerts.
+                        </Alert>
+                    )}
+
                     <FormField
-                        label="City"
-                        value={data.city}
-                        onChange={(e) => setData('city', e.target.value)}
-                        error={errors.city}
-                        maxLength={100}
+                        label="Address line 1"
+                        value={data.street_address}
+                        onChange={(e) => setData('street_address', e.target.value)}
+                        error={errors.street_address}
+                        maxLength={255}
+                        autoComplete="address-line1"
                         required
                     />
 
                     <FormField
-                        label="County"
-                        value={data.county}
-                        onChange={(e) => setData('county', e.target.value)}
-                        error={errors.county}
-                        maxLength={100}
-                        hint="Optional."
+                        label="Address line 2"
+                        value={data.address_line_2}
+                        onChange={(e) => setData('address_line_2', e.target.value)}
+                        error={errors.address_line_2}
+                        maxLength={255}
+                        autoComplete="address-line2"
+                        hint="Optional. Building, floor or suite."
                     />
 
-                    <FormField
-                        label="State"
-                        value={data.state}
-                        onChange={(e) => setData('state', e.target.value.toUpperCase())}
-                        error={errors.state}
-                        maxLength={2}
-                        required
-                    />
+                    <div className="grid gap-x-4 sm:grid-cols-2">
+                        <FormField
+                            label={format?.locality_label ?? 'City'}
+                            value={data.city}
+                            onChange={(e) => setData('city', e.target.value)}
+                            error={errors.city}
+                            maxLength={100}
+                            autoComplete="address-level2"
+                            required
+                        />
 
-                    <FormField
-                        label="ZIP code"
-                        value={data.zip}
-                        onChange={(e) => setData('zip', e.target.value)}
-                        error={errors.zip}
-                        inputMode="numeric"
-                        maxLength={5}
-                        hint="Five digits. This determines which weather alerts residents receive."
-                        required
-                    />
-                </div>
+                        <FormField label="County" error={errors.county} maxLength={100} hint="Optional.">
+                            <input
+                                type="text"
+                                value={data.county}
+                                onChange={(e) => setData('county', e.target.value)}
+                                maxLength={100}
+                                className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
+                            />
+                        </FormField>
+
+                        {/* A select where the country has a fixed list, a text
+                            box where it does not — an empty dropdown is worse
+                            than no dropdown. */}
+                        <FormField
+                            label={format?.administrative_area_label ?? 'State or province'}
+                            error={errors.state}
+                            required={Boolean(format?.has_subdivisions)}
+                        >
+                            {format?.has_subdivisions ? (
+                                <select
+                                    value={data.state}
+                                    onChange={(e) => setData('state', e.target.value)}
+                                    disabled={loadingCountry}
+                                    autoComplete="address-level1"
+                                    className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600 disabled:bg-gray-100"
+                                >
+                                    <option value="">
+                                        {loadingCountry ? 'Loading…' : `Choose a ${(format?.administrative_area_label ?? 'region').toLowerCase()}…`}
+                                    </option>
+                                    {subdivisions.map((s) => (
+                                        <option key={s.code} value={s.code}>{s.name}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <input
+                                    type="text"
+                                    value={data.state}
+                                    onChange={(e) => setData('state', e.target.value)}
+                                    maxLength={64}
+                                    autoComplete="address-level1"
+                                    className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
+                                />
+                            )}
+                        </FormField>
+
+                        <FormField
+                            label={`${format?.postal_code_label ?? 'Postal'} code`}
+                            value={data.postal_code}
+                            onChange={(e) => setData('postal_code', e.target.value)}
+                            error={errors.postal_code}
+                            maxLength={16}
+                            autoComplete="postal-code"
+                            required={Boolean(format?.postal_code_required)}
+                            hint={
+                                data.country_code === 'US'
+                                    ? 'Five digits. This determines which weather alerts residents receive.'
+                                    : undefined
+                            }
+                        />
+                    </div>
+                </fieldset>
 
                 <FormField label="Notes" error={errors.notes} hint="Optional. Not visible to residents.">
                     <textarea

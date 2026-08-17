@@ -17,12 +17,16 @@ class PropertyFactory extends Factory
     {
         return [
             'name' => fake()->buildingNumber().' '.fake()->streetName(),
+            // Set explicitly rather than relying on the column default: the
+            // default applies at the database, so a freshly created model would
+            // otherwise carry null until it was reloaded.
+            'country_code' => 'US',
             'street_address' => fake()->buildingNumber().' '.fake()->streetName(),
             'city' => fake()->randomElement(['Atlanta', 'Decatur', 'Marietta', 'East Point']),
             'state' => 'GA',
             // Real five-digit Georgia ZIPs — ZIP drives weather targeting, so a
             // plausible one keeps WP-21 testable.
-            'zip' => fake()->randomElement(['30310', '30030', '30060', '30344']),
+            'postal_code' => fake()->randomElement(['30310', '30030', '30060', '30344']),
             'county' => fake()->randomElement(['Fulton', 'DeKalb', 'Cobb']),
         ];
     }

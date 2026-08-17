@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PropertyRequest;
 use App\Models\Property;
+use App\Support\AddressCatalogue;
 use App\Support\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,7 @@ class PropertyController extends Controller
                     ->where('name', 'like', "%{$search}%")
                     ->orWhere('street_address', 'like', "%{$search}%")
                     ->orWhere('city', 'like', "%{$search}%")
-                    ->orWhere('zip', 'like', "%{$search}%"));
+                    ->orWhere('postal_code', 'like', "%{$search}%"));
             })
             ->orderBy('name')
             ->paginate(25)
@@ -44,9 +45,12 @@ class PropertyController extends Controller
         ]);
     }
 
-    public function create(): Response
+    public function create(AddressCatalogue $addresses): Response
     {
-        return Inertia::render('Admin/Properties/Form', ['property' => null]);
+        return Inertia::render('Admin/Properties/Form', [
+            'property' => null,
+            ...$this->addressOptions($addresses, 'US'),
+        ]);
     }
 
     public function store(PropertyRequest $request, AuditLogger $audit): RedirectResponse
@@ -76,9 +80,28 @@ class PropertyController extends Controller
         ]);
     }
 
-    public function edit(Property $property): Response
+    public function edit(Property $property, AddressCatalogue $addresses): Response
     {
-        return Inertia::render('Admin/Properties/Form', ['property' => $property]);
+        return Inertia::render('Admin/Properties/Form', [
+            'property' => $property,
+            ...$this->addressOptions($addresses, $property->country_code ?? 'US'),
+        ]);
+    }
+
+    /**
+     * Country list plus the selected country's subdivisions and labels, so the
+     * form renders correctly on first paint. Changing the country afterwards
+     * fetches from AddressLookupController.
+     *
+     * @return array<string, mixed>
+     */
+    private function addressOptions(AddressCatalogue $addresses, string $countryCode): array
+    {
+        return [
+            'countries' => $addresses->countries(),
+            'subdivisions' => $addresses->subdivisions($countryCode),
+            'addressFormat' => $addresses->formatFor($countryCode),
+        ];
     }
 
     public function update(PropertyRequest $request, Property $property, AuditLogger $audit): RedirectResponse
@@ -103,7 +126,7 @@ class PropertyController extends Controller
             ]);
         }
 
-        $audit->record('property.deleted', $property, $property->only(['name', 'street_address', 'zip']));
+        $audit->record('property.deleted', $property, $property->only(['name', 'street_address', 'postal_code']));
         $property->delete();
 
         return redirect()
