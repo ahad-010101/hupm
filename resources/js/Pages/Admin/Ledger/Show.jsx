@@ -19,7 +19,15 @@ import Money from '@/Components/Money';
  * The two balances are never added together: they are two separate obligations
  * (BR-01), and a combined total would answer a question nobody asks.
  */
-export default function Show({ tenant, hasActiveLease, balances, entries, flash = {}, errors = {} }) {
+export default function Show({
+    tenant,
+    hasActiveLease,
+    balances,
+    entries,
+    allocationOrder,
+    flash = {},
+    errors = {},
+}) {
     const [reversing, setReversing] = useState(null);
     const [adjusting, setAdjusting] = useState(false);
 
@@ -48,6 +56,43 @@ export default function Show({ tenant, hasActiveLease, balances, entries, flash 
                     {e.reverses_entry_id && (
                         <span className="block text-sm text-gray-600">
                             Reverses entry #{e.reverses_entry_id}
+                        </span>
+                    )}
+
+                    {/* FR-LED-03. "The balance is $300" is not something a
+                        tenant can check; "your $200 paid January's fee and
+                        $150 of February's rent" is. */}
+                    {e.outstanding && e.allocated !== '0.00' && (
+                        <span className="block text-sm text-gray-600">
+                            <Money value={e.allocated} /> paid
+                            {e.outstanding !== '0.00' ? (
+                                <>
+                                    {' · '}
+                                    <Money value={e.outstanding} /> outstanding
+                                </>
+                            ) : (
+                                ' in full'
+                            )}
+                            {e.paid_by?.length > 0 &&
+                                ` (payment ${e.paid_by.map((id) => `#${id}`).join(', ')})`}
+                        </span>
+                    )}
+
+                    {e.applied_to?.length > 0 && (
+                        <span className="block text-sm text-gray-600">
+                            Applied to{' '}
+                            {e.applied_to.map((a, i) => (
+                                <span key={a.charge_entry_id}>
+                                    {i > 0 && ', '}
+                                    {a.description} (<Money value={a.amount} />)
+                                </span>
+                            ))}
+                        </span>
+                    )}
+
+                    {e.unapplied && e.unapplied !== '0.00' && (
+                        <span className="block text-sm font-medium text-gray-900">
+                            <Money value={e.unapplied} /> unapplied credit
                         </span>
                     )}
                 </span>
@@ -138,7 +183,14 @@ export default function Show({ tenant, hasActiveLease, balances, entries, flash 
             </div>
 
             <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-900">Transactions</h2>
+                <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Transactions</h2>
+                    {allocationOrder && (
+                        <p className="text-sm text-gray-600">
+                            Payments applied: {allocationOrder.toLowerCase()}
+                        </p>
+                    )}
+                </div>
                 {hasActiveLease && (
                     <button
                         type="button"

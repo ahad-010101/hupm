@@ -4,6 +4,7 @@ namespace App\Domain\Charges;
 
 use App\Domain\Ledger\LedgerService;
 use App\Domain\Notifications\NotificationService;
+use App\Domain\Payments\AllocationService;
 use App\Domain\Notifications\NotificationTemplate;
 use App\Models\Lease;
 use App\Models\LedgerEntry;
@@ -34,6 +35,7 @@ class ChargePostingService
         private readonly BusinessCalendar $calendar,
         private readonly Settings $settings,
         private readonly NotificationService $notifications,
+        private readonly AllocationService $allocations,
     ) {}
 
     /**
@@ -60,6 +62,17 @@ class ChargePostingService
 
             foreach ($this->periods->duePeriodsFor($lease, $asOf) as $period) {
                 $posted += $this->postPeriod($lease, $period);
+            }
+
+            if ($posted > 0) {
+                // A credit on the account meets the charge it was meant for,
+                // in the same transaction that created the charge (Q-8,
+                // `credit_forward`). Left until later, the new charge would sit
+                // outstanding beside a credit that covers it — and WP-23 would
+                // put a late fee on rent the tenant has already paid.
+                foreach (['tenant', 'housing_authority'] as $payer) {
+                    $this->allocations->applyCreditsFor($lease->tenant_id, $payer);
+                }
             }
 
             return $posted;

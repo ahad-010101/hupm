@@ -23,8 +23,13 @@ use Illuminate\Support\Facades\Route;
 
 const LEDGER_TABLE = 'ledger_entries';
 
-/** The one file allowed to write. */
+const ALLOCATION_TABLE = 'payment_allocations';
+
+/** The one file allowed to write the ledger. */
 const SOLE_WRITER = 'app/Domain/Ledger/LedgerService.php';
+
+/** The one file allowed to write allocations. */
+const SOLE_ALLOCATOR = 'app/Domain/Payments/AllocationService.php';
 
 /**
  * Every scanned file, with comments removed.
@@ -34,9 +39,10 @@ const SOLE_WRITER = 'app/Domain/Ledger/LedgerService.php';
  * source of truth" — prose explaining the rule, read as a violation of it. An
  * architecture test that greps documentation punishes writing any down.
  *
+ * @param  string  ...$except  the file the rule under test permits to write
  * @return array<string, string> relative path => code without comments
  */
-function scannedSources(): array
+function scannedSources(string ...$except): array
 {
     $root = realpath(__DIR__.'/../..');
     $sources = [];
@@ -53,7 +59,7 @@ function scannedSources(): array
 
             $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
 
-            if ($relative === SOLE_WRITER) {
+            if (in_array($relative, $except, true)) {
                 continue;
             }
 
@@ -85,7 +91,8 @@ it('has sources to scan', function () {
     // A filter that silently matches nothing would make every assertion below
     // vacuously true.
     expect(scannedSources())->not->toBeEmpty()
-        ->and(file_exists(__DIR__.'/../../'.SOLE_WRITER))->toBeTrue();
+        ->and(file_exists(__DIR__.'/../../'.SOLE_WRITER))->toBeTrue()
+        ->and(file_exists(__DIR__.'/../../'.SOLE_ALLOCATOR))->toBeTrue();
 });
 
 it('I-2 lets no other class write ledger_entries through Eloquent', function () {
@@ -102,7 +109,7 @@ it('I-2 lets no other class write ledger_entries through Eloquent', function () 
         '/new\s+LedgerEntry\b/' => 'new LedgerEntry',
     ];
 
-    foreach (scannedSources() as $path => $source) {
+    foreach (scannedSources(SOLE_WRITER) as $path => $source) {
         foreach ($forbidden as $pattern => $label) {
             if (preg_match($pattern, $source)) {
                 $offenders[] = "{$path} uses {$label}";
@@ -116,7 +123,7 @@ it('I-2 lets no other class write ledger_entries through Eloquent', function () 
 it('I-2 lets no other class write ledger_entries through the query builder', function () {
     $offenders = [];
 
-    foreach (scannedSources() as $path => $source) {
+    foreach (scannedSources(SOLE_WRITER) as $path => $source) {
         // Reads are fine — BalanceCalculator sums through the query builder on
         // purpose. Only writes are forbidden.
         foreach (['insert', 'insertGetId', 'update', 'delete', 'upsert', 'truncate'] as $write) {
@@ -150,6 +157,68 @@ it('AC-LED-01 exposes no route that updates or deletes a ledger entry', function
     // Corrections are reversing entries. There is no edit route to secure,
     // because there is no edit route.
     expect($offending->pluck('uri')->all())->toBe([]);
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Sole allocation writer  [WP-11, FR-LED-03]
+ |--------------------------------------------------------------------------
+ |
+ | The same rule for the same reason. An allocation decides how much of a
+ | charge is still owed, so a second writer is a second answer to "what does
+ | this tenant owe" — and unlike the ledger, allocations have no reversing-entry
+ | discipline to make a wrong one visible. They are stamped, not opposed.
+ |
+ */
+
+it('lets no other class write payment_allocations through Eloquent', function () {
+    $offenders = [];
+
+    $forbidden = [
+        '/PaymentAllocation::create\s*\(/' => 'PaymentAllocation::create()',
+        '/PaymentAllocation::insert\s*\(/' => 'PaymentAllocation::insert()',
+        '/PaymentAllocation::insertGetId\s*\(/' => 'PaymentAllocation::insertGetId()',
+        '/PaymentAllocation::updateOrCreate\s*\(/' => 'PaymentAllocation::updateOrCreate()',
+        '/PaymentAllocation::firstOrCreate\s*\(/' => 'PaymentAllocation::firstOrCreate()',
+        '/PaymentAllocation::forceCreate\s*\(/' => 'PaymentAllocation::forceCreate()',
+        '/PaymentAllocation::upsert\s*\(/' => 'PaymentAllocation::upsert()',
+        '/new\s+PaymentAllocation\b/' => 'new PaymentAllocation',
+    ];
+
+    foreach (scannedSources(SOLE_ALLOCATOR) as $path => $source) {
+        foreach ($forbidden as $pattern => $label) {
+            if (preg_match($pattern, $source)) {
+                $offenders[] = "{$path} uses {$label}";
+            }
+        }
+    }
+
+    expect($offenders)->toBe([], implode(PHP_EOL, $offenders));
+});
+
+it('lets no other class write payment_allocations through the query builder', function () {
+    $offenders = [];
+
+    foreach (scannedSources(SOLE_ALLOCATOR) as $path => $source) {
+        foreach (['insert', 'insertGetId', 'update', 'delete', 'upsert', 'truncate'] as $write) {
+            $pattern = '/table\(\s*[\'"]'.ALLOCATION_TABLE.'[\'"]\s*\)(?:(?!;).)*->'.$write.'\s*\(/s';
+
+            if (preg_match($pattern, $source)) {
+                $offenders[] = "{$path} calls ->{$write}() on ".ALLOCATION_TABLE;
+            }
+        }
+    }
+
+    expect($offenders)->toBe([], implode(PHP_EOL, $offenders));
+});
+
+it('D-02 un-allocates by stamping reversed_at, never by deleting', function () {
+    $model = new App\Models\PaymentAllocation;
+
+    expect($model->getGuarded())->toBe(['*'])
+        // The Immutable trait refuses a delete outright; `reversed_at` is the
+        // only attribute that may change after the row exists.
+        ->and((fn () => $this->mutableAttributes())->call($model))->toBe(['reversed_at']);
 });
 
 it('BR-03 / I-1 stores no balance anywhere, so nothing can drift', function () {

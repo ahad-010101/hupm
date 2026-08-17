@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Ledger\LedgerService;
+use App\Domain\Payments\AllocationOrderRegistry;
 use App\Http\Controllers\Controller;
 use App\Models\Lease;
 use App\Models\LedgerEntry;
@@ -11,6 +12,7 @@ use App\Models\Tenant;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -29,6 +31,7 @@ class LedgerController extends Controller
     public function __construct(
         private readonly LedgerService $ledger,
         private readonly BalanceCalculator $balances,
+        private readonly AllocationOrderRegistry $orders,
     ) {}
 
     public function index(): Response
@@ -60,6 +63,10 @@ class LedgerController extends Controller
                 'property' => $lease?->unit?->property?->name,
             ],
             'hasActiveLease' => $lease !== null,
+            // Which waterfall is running (Q-1). Shown rather than assumed —
+            // "why did my $200 pay the fee and not the rent" has one answer and
+            // it is a setting.
+            'allocationOrder' => $this->orders->current()->label(),
             'balances' => [
                 'tenant' => (string) $this->balances->tenantBalance($tenant->id),
                 'ha' => (string) $this->balances->haBalance($tenant->id),
@@ -133,9 +140,10 @@ class LedgerController extends Controller
             ->orderBy('id')
             ->get();
 
+        [$byCharge, $byPayment] = $this->allocationsFor($tenant);
         $running = ['tenant' => Money::zero(), 'housing_authority' => Money::zero()];
 
-        return $entries->map(function (LedgerEntry $entry) use (&$running) {
+        return $entries->map(function (LedgerEntry $entry) use (&$running, $byCharge, $byPayment) {
             if ($entry->affectsBalance()) {
                 $running[$entry->payer] = $running[$entry->payer]->plus($entry->amount);
             }
@@ -157,7 +165,76 @@ class LedgerController extends Controller
                 // offering an action that will be refused.
                 'is_reversed' => $entry->reversal !== null,
                 'can_reverse' => $entry->type !== 'reversal' && $entry->reversal === null,
+                // FR-LED-03. What paid this charge, or what this payment paid.
+                ...$this->allocationFieldsFor($entry, $byCharge, $byPayment),
             ];
         })->all();
+    }
+
+    /**
+     * Every allocation touching this tenant, indexed both ways.
+     *
+     * One query rather than one per row: the ledger view is the screen most
+     * likely to be left open on a tenant with three years of history.
+     *
+     * @return array{0: \Illuminate\Support\Collection, 1: \Illuminate\Support\Collection}
+     */
+    private function allocationsFor(Tenant $tenant): array
+    {
+        $rows = DB::table('payment_allocations as a')
+            ->join('ledger_entries as charge', 'charge.id', '=', 'a.charge_entry_id')
+            ->where('charge.tenant_id', $tenant->id)
+            ->orderBy('a.id')
+            ->get([
+                'a.payment_id', 'a.charge_entry_id', 'a.amount', 'a.reversed_at',
+                'charge.description as charge_description',
+            ]);
+
+        return [$rows->groupBy('charge_entry_id'), $rows->groupBy('payment_id')];
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection  $byCharge
+     * @param  \Illuminate\Support\Collection  $byPayment
+     * @return array<string, mixed>
+     */
+    private function allocationFieldsFor(LedgerEntry $entry, $byCharge, $byPayment): array
+    {
+        if ($entry->type === 'payment') {
+            $applied = $byPayment->get($entry->payment_id, collect())
+                ->reject(fn ($a) => $a->reversed_at !== null);
+
+            // The unapplied part is a credit sitting on the account. It is
+            // already in the balance; it just has not met a charge yet.
+            $total = Money::sum(
+                $applied->map(fn ($a) => Money::fromString((string) $a->amount))->all()
+            );
+
+            return [
+                'applied_to' => $applied
+                    ->map(fn ($a) => [
+                        'charge_entry_id' => $a->charge_entry_id,
+                        'description' => $a->charge_description,
+                        'amount' => (string) Money::fromString((string) $a->amount),
+                    ])
+                    ->values()
+                    ->all(),
+                'unapplied' => (string) $entry->amount->absolute()->minus($total),
+            ];
+        }
+
+        if (! in_array($entry->type, ['charge', 'adjustment'], true) || ! $entry->amount->isPositive()) {
+            return [];
+        }
+
+        $live = $byCharge->get($entry->id, collect())->reject(fn ($a) => $a->reversed_at !== null);
+
+        $allocated = Money::sum($live->map(fn ($a) => Money::fromString((string) $a->amount))->all());
+
+        return [
+            'allocated' => (string) $allocated,
+            'outstanding' => (string) $entry->amount->minus($allocated),
+            'paid_by' => $live->pluck('payment_id')->unique()->values()->all(),
+        ];
     }
 }
