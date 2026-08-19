@@ -20,12 +20,16 @@ import Money from '@/Components/Money';
  * portion. The balance passed in is the tenant portion only.
  */
 
+/*
+ * Four tabs, not the five in UI §2.2. Requests (WP-19) and More do not exist
+ * yet, and a tab that 404s teaches someone the app is broken — worse than a
+ * tab that is not there. They go back in with the screens behind them.
+ */
 const TABS = [
     { href: '/portal', label: 'Home', glyph: '⌂' },
     { href: '/portal/pay', label: 'Pay', glyph: '$' },
-    { href: '/portal/maintenance', label: 'Requests', glyph: '✎' },
+    { href: '/portal/ledger', label: 'History', glyph: '☰' },
     { href: '/portal/documents', label: 'Docs', glyph: '▤' },
-    { href: '/portal/more', label: 'More', glyph: '⋯' },
 ];
 
 function isActive(url, href) {

@@ -8,7 +8,9 @@ use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
+use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\DocumentController;
+use App\Http\Controllers\Portal\LedgerController as PortalLedgerController;
 use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -33,17 +35,14 @@ Route::middleware('auth')->group(function () {
      | Tenant portal
      */
     Route::middleware('role:tenant')->prefix('portal')->name('portal.')->group(function () {
-        // I-4 / AC-LED-02: the balance here is the TENANT portion only. The
-        // Housing Authority figure must not appear in the props at all — not
-        // hidden by CSS, not filtered in the component, simply absent.
-        Route::get('/', function (App\Domain\Ledger\BalanceCalculator $balances) {
-            $tenantId = request()->user()->tenant_id;
+        // I-4 / AC-POR-01: every figure on these screens is the TENANT portion.
+        // The Housing Authority amount is not filtered out downstream — the
+        // queries behind them never select it.
+        Route::get('/', DashboardController::class)->name('dashboard');
 
-            return Inertia::render('Portal/Dashboard', [
-                'balance' => $tenantId ? (string) $balances->tenantBalance($tenantId) : null,
-                'pending' => $tenantId ? (string) $balances->pendingPayments($tenantId) : null,
-            ]);
-        })->name('dashboard');
+        // Own ledger and statement (API-POR-02/03).
+        Route::get('/ledger', [PortalLedgerController::class, 'index'])->name('ledger.index');
+        Route::get('/ledger/export', [PortalLedgerController::class, 'export'])->name('ledger.export');
         /*
          | Pay (API-POR-05/06). The throttle is per tenant, not per IP: a
          | household behind one address is one tenant, and five attempts an

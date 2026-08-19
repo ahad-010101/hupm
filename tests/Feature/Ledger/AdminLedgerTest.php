@@ -50,7 +50,7 @@ it('AC-LED-02 shows the tenant $300 with no trace of the $700 in the payload', f
 
     $response->assertOk()->assertInertia(fn ($page) => $page
         ->component('Portal/Dashboard')
-        ->where('balance', '300.00'));
+        ->where('balances.balance', '300.00'));
 
     // I-4 is structural, not cosmetic: the figure is absent from the response
     // entirely, so no future change to the component can reveal it.
@@ -68,7 +68,7 @@ it('AC-LED-02 keeps the HA figure out even when the tenant owes nothing', functi
 
     $response = $this->actingAs($tenantUser)->get('/portal');
 
-    $response->assertInertia(fn ($page) => $page->where('balance', '0.00'));
+    $response->assertInertia(fn ($page) => $page->where('balances.balance', '0.00'));
     expect($response->getContent())->not->toContain('700');
 });
 
