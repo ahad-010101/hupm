@@ -233,6 +233,42 @@ it('I-5 keeps our own credentials out of the log when the gateway echoes them ba
     });
 });
 
+it('names the localhost return URL instead of blaming the provider', function () {
+    // Authorize.Net rejects the hostname `localhost` with "must begin with
+    // http:// or https://" — a message about something else entirely, which
+    // sends you looking in the wrong place. Found against the live sandbox; no
+    // fixture would have said a word.
+    Http::fake();
+
+    $call = fn () => app(App\Domain\Payments\PaymentIntentService::class)->create(
+        lease: $this->lease,
+        amount: Money::fromString('400.00'),
+        idempotencyKey: (string) Str::uuid(),
+        returnUrl: 'http://localhost:8000/portal/pay/confirm',
+        cancelUrl: 'http://localhost:8000/portal/pay/confirm?cancelled=1',
+    );
+
+    expect($call)->toThrow(App\Exceptions\GatewayUnavailableException::class);
+
+    // Nothing sent and nothing written. This is our configuration, not an
+    // outage, so there is no failed attempt worth recording (F1 is about the
+    // provider being down, which is a different fact).
+    Http::assertNothingSent();
+    expect(Payment::count())->toBe(0)
+        ->and(LedgerEntry::where('type', 'payment')->count())->toBe(0);
+});
+
+it('accepts 127.0.0.1 and a real domain, which is what the gateway allows', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+    $gateway = app(App\Domain\Payments\AuthorizeNetGateway::class);
+
+    foreach (['http://127.0.0.1:8000/portal/pay/confirm', 'https://hupm.example.com/portal/pay/confirm'] as $url) {
+        $gateway->assertUsableReturnUrl($url);
+    }
+
+    expect(true)->toBeTrue();
+});
+
 it('AC-PAY-03 refuses a payment while the account is in Management Review', function () {
     $this->lease->forceFill(['delinquency_state' => 'management_review'])->save();
     Http::fake();

@@ -79,6 +79,8 @@ class AuthorizeNetGateway
         string $cancelUrl,
         ?string $customerProfileId = null,
     ): string {
+        $this->assertUsableReturnUrl($returnUrl);
+
         $transaction = [
             'transactionType' => 'authCaptureTransaction',
             'amount' => $payment->amount->toDecimalString(),
@@ -115,6 +117,39 @@ class AuthorizeNetGateway
         }
 
         return $token;
+    }
+
+    /**
+     * Authorize.Net will not accept `localhost` as a return URL.
+     *
+     * It accepts 127.0.0.1 and any real domain, but rejects the hostname
+     * `localhost` with "must begin with http:// or https://" — a message that
+     * describes something else entirely and sends you looking in the wrong
+     * place. Found against the live sandbox; no fixture would have said a word.
+     *
+     * Named here as the configuration error it is, rather than surfacing as
+     * "the provider is unreachable", because those two need different fixes and
+     * only one of them is yours. Rewriting the host is not the answer: the
+     * session cookie is issued for `localhost`, so a tenant returned to
+     * 127.0.0.1 would arrive logged out.
+     *
+     * Public so the intent can check it before writing anything. A failed
+     * payment row is evidence that the provider was down (F1); it is not
+     * evidence for our own misconfiguration, and filing one would be noise.
+     */
+    public function assertUsableReturnUrl(string $url): void
+    {
+        if (! preg_match('~^https?://localhost(:\d+)?(/|$)~i', $url)) {
+            return;
+        }
+
+        throw new GatewayUnavailableException(
+            'Online payments are not switched on yet.',
+            [
+                'reason' => 'APP_URL uses localhost, which Authorize.Net rejects as a return URL. '
+                    .'Set APP_URL to http://127.0.0.1:8000 locally, or a real domain.',
+            ],
+        );
     }
 
     /**

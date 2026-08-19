@@ -56,6 +56,11 @@ class PaymentIntentService
     ): array {
         $this->guardDelinquency($lease);
 
+        // Before anything is written or sent: a return URL the gateway will
+        // refuse is our configuration, not an outage, and it should not leave a
+        // failed payment behind to explain.
+        $this->gateway->assertUsableReturnUrl($returnUrl);
+
         // A double-click is the same intent twice, not two intents (AC-PAY-02).
         // The token is cached with the payment so the second click reaches the
         // *same* form — a second token would be a second chance to submit.
