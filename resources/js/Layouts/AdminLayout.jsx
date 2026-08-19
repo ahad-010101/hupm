@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, usePage } from '@inertiajs/react';
+import Alert from '@/Components/Alert';
 import {
     ArrowUpTrayIcon,
     BanknotesIcon,
@@ -137,7 +138,8 @@ function SidebarNav({ url, onNavigate, collapsible = false }) {
 }
 
 export default function AdminLayout({ header, exceptionCount = 0, children }) {
-    const { url } = usePage();
+    const { url, props } = usePage();
+    const reconciliation = props.reconciliation;
     const [drawerOpen, setDrawerOpen] = useState(false);
 
     return (
@@ -221,6 +223,31 @@ export default function AdminLayout({ header, exceptionCount = 0, children }) {
 
                 <main className="min-w-0 flex-1 px-4 py-6">
                     {header && <h1 className="mb-4 text-xl font-semibold text-gray-900">{header}</h1>}
+
+                    {/* R-6 / UI §3.9. Admin-wide, because a reconciliation that
+                        stopped is invisible by nature: nothing errors, nothing
+                        looks broken, balances just quietly drift from reality.
+                        On shared hosting the usual cause is a cron entry with
+                        the wrong PHP path, which fails without a sound. */}
+                    {reconciliation?.stale && (
+                        <Alert
+                            tone="error"
+                            className="mb-4"
+                            title="Payment reconciliation has not run since yesterday"
+                        >
+                            The last successful run was {reconciliation.hours_ago} hours ago. Until it
+                            runs, settled payments will not clear and returned payments will not show.
+                            Check the cron entry, then{' '}
+                            <Link
+                                href="/admin/payments"
+                                className="font-semibold underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                            >
+                                run it by hand
+                            </Link>
+                            .
+                        </Alert>
+                    )}
+
                     {children}
                 </main>
             </div>

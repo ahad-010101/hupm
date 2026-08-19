@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\ReconciliationHealth;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -50,6 +51,14 @@ class HandleInertiaRequests extends Middleware
                 'status' => fn () => $request->session()->get('status'),
                 'error' => fn () => $request->session()->get('error'),
             ],
+
+            // R-6 / UI §3.9. Admin-wide, not one screen: a reconciliation that
+            // stopped is invisible by nature, so the warning has to follow the
+            // admin around rather than wait on a page nobody opens. A closure,
+            // so the query runs only for an admin and never on the portal.
+            'reconciliation' => fn () => $request->user()?->role === 'admin'
+                ? app(ReconciliationHealth::class)->status()
+                : null,
         ];
     }
 }

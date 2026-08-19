@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Domain\Payments\AllocationService;
 use App\Domain\Payments\PaymentRecordingService;
+use App\Domain\Payments\ReconciliationService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\RecordPaymentRequest;
 use App\Http\Requests\Admin\RecordRemittanceRequest;
@@ -12,6 +13,7 @@ use App\Models\Lease;
 use App\Models\Payment;
 use App\Support\BusinessCalendar;
 use App\Support\Money;
+use App\Support\ReconciliationHealth;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,6 +44,13 @@ class PaymentController extends Controller
             ->with(['tenant:id,first_name,last_name'])
             ->when($request->string('status')->value(), fn ($q, $s) => $q->where('status', $s))
             ->when($request->string('batch')->value(), fn ($q, $b) => $q->where('batch_id', $b))
+            // Pending, known to the gateway, and older than the reconciliation
+            // window. Never auto-voided (FR-PAY-04 step 6) — surfaced instead,
+            // because it needs a person.
+            ->when($request->boolean('unmatched'), fn ($q) => $q
+                ->where('status', Payment::STATUS_PENDING)
+                ->whereNotNull('gateway_transaction_id')
+                ->where('submitted_at', '<', now()->subDays(ReconciliationService::WINDOW_DAYS)))
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate(25)
@@ -59,11 +68,21 @@ class PaymentController extends Controller
                 'batch_id' => $payment->batch_id,
                 'status' => $payment->status,
                 'received_on' => $payment->submitted_at?->toDateString(),
+                'return_code' => $payment->return_code,
+                'return_description' => $payment->return_description,
+                'flagged' => $payment->webhook_flagged_at !== null,
             ]);
 
         return Inertia::render('Admin/Payments/Index', [
             'payments' => $payments,
-            'filters' => $request->only(['status', 'batch']),
+            'filters' => $request->only(['status', 'batch', 'unmatched']),
+            // UI §3.9: visible at all times, not only when it is bad news.
+            'reconciliation' => app(ReconciliationHealth::class)->status(),
+            'unmatchedCount' => Payment::query()
+                ->where('status', Payment::STATUS_PENDING)
+                ->whereNotNull('gateway_transaction_id')
+                ->where('submitted_at', '<', now()->subDays(ReconciliationService::WINDOW_DAYS))
+                ->count(),
         ]);
     }
 
@@ -101,6 +120,29 @@ class PaymentController extends Controller
             ->with('status', $unapplied->isPositive()
                 ? "Payment recorded. {$unapplied->format()} is unapplied and shows as a credit."
                 : 'Payment recorded and applied.');
+    }
+
+    /**
+     * API-ADM-16. Reconcile now, by hand.
+     *
+     * The same service the nightly job calls — not a second implementation.
+     * An admin chasing a payment that should have cleared needs the answer the
+     * job would have given, not a different one.
+     */
+    public function reconcile(ReconciliationService $reconciliation): RedirectResponse
+    {
+        $result = $reconciliation->run();
+
+        $message = sprintf(
+            'Reconciliation finished — %d settled, %d returned, %d needing review.',
+            $result['settled'],
+            $result['returned'],
+            $result['unmatched'],
+        );
+
+        return $result['errors'] === []
+            ? back()->with('status', $message)
+            : back()->with('error', $message.' '.count($result['errors']).' could not be read; see the audit log.');
     }
 
     /** The lump-sum split screen. [GATE Q-2, R-9] */

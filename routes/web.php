@@ -109,6 +109,10 @@ Route::middleware('auth')->group(function () {
         Route::get('payments/record', [PaymentController::class, 'create'])->name('payments.create');
         Route::post('payments/record', [PaymentController::class, 'store'])->name('payments.store');
 
+        // API-ADM-16. Runs the same service as the nightly job, never a second
+        // implementation of it.
+        Route::post('payments/reconcile', [PaymentController::class, 'reconcile'])->name('payments.reconcile');
+
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');

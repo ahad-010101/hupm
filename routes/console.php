@@ -2,6 +2,7 @@
 
 use App\Jobs\CleanupAbandonedPayments;
 use App\Jobs\PostScheduledCharges;
+use App\Jobs\ReconcilePayments;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -37,6 +38,17 @@ Schedule::job(new PostScheduledCharges)
     ->timezone(config('app.business_timezone', 'America/New_York'))
     ->withoutOverlapping()
     ->name('post-scheduled-charges');
+
+/*
+ | Settlement reconciliation (FR-PAY-04). 06:00, after the overnight settlement
+ | window, and independent of the charge job — a failure in one must not stop
+ | the other. Re-reads ten days, so a missed run heals itself.
+ */
+Schedule::job(new ReconcilePayments)
+    ->dailyAt('06:00')
+    ->timezone(config('app.business_timezone', 'America/New_York'))
+    ->withoutOverlapping()
+    ->name('reconcile-payments');
 
 /*
  | Payments a tenant started and never finished (FR-PAY-01 A1). Hourly rather

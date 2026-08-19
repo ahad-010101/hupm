@@ -5,6 +5,7 @@ namespace App\Domain\Payments;
 use App\Exceptions\GatewayUnavailableException;
 use App\Models\Payment;
 use App\Models\Tenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -192,6 +193,48 @@ class AuthorizeNetGateway
         ], retry: true);
 
         return $response['transaction'] ?? [];
+    }
+
+    /**
+     * Batches settled in a window.  [FR-PAY-04 step 1]
+     *
+     * The reporting API, not the webhook: ACH returns are reported on
+     * settlement statements and a webhook may arrive late, twice or never
+     * (R-6). This is the authoritative source and the only one.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function settledBatches(CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $response = $this->send([
+            'getSettledBatchListRequest' => [
+                'merchantAuthentication' => $this->authentication(),
+                'includeStatistics' => 'false',
+                // The API wants UTC and rejects a window it considers invalid.
+                'firstSettlementDate' => $from->utc()->format('Y-m-d\TH:i:s\Z'),
+                'lastSettlementDate' => $to->utc()->format('Y-m-d\TH:i:s\Z'),
+            ],
+        ], retry: true);
+
+        return $response['batchList'] ?? [];
+    }
+
+    /**
+     * Every transaction in one settled batch.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function batchTransactions(string $batchId): array
+    {
+        $response = $this->send([
+            'getTransactionListRequest' => [
+                'merchantAuthentication' => $this->authentication(),
+                'batchId' => $batchId,
+                'sorting' => ['orderBy' => 'submitTimeUTC', 'orderDescending' => 'false'],
+            ],
+        ], retry: true);
+
+        return $response['transactions'] ?? [];
     }
 
     /**

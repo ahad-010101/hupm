@@ -1,4 +1,4 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import DataTable from '@/Components/DataTable';
 import EmptyState from '@/Components/EmptyState';
@@ -31,7 +31,15 @@ const TABS = [
     { value: 'returned', label: 'Returned' },
 ];
 
-export default function Index({ payments, filters = {}, flash = {} }) {
+export default function Index({
+    payments,
+    filters = {},
+    reconciliation = {},
+    unmatchedCount = 0,
+    flash = {},
+}) {
+    const rerun = useForm({});
+
     const setStatus = (status) => {
         router.get('/admin/payments', status ? { status } : {}, { preserveScroll: true });
     };
@@ -96,7 +104,26 @@ export default function Index({ payments, filters = {}, flash = {} }) {
                 </span>
             ),
         },
-        { key: 'status', header: 'Status', align: 'right', render: (p) => <StatusBadge status={p.status} /> },
+        {
+            key: 'status',
+            header: 'Status',
+            align: 'right',
+            render: (p) => (
+                <span>
+                    <StatusBadge status={p.status} />
+                    {p.return_code && (
+                        // The bank's code and its words. "Returned" alone is not
+                        // something anyone can act on.
+                        <span className="block text-sm text-gray-600">
+                            {p.return_code} — {p.return_description}
+                        </span>
+                    )}
+                    {p.flagged && (
+                        <span className="block text-sm text-gray-600">Awaiting reconciliation</span>
+                    )}
+                </span>
+            ),
+        },
     ];
 
     return (
@@ -104,6 +131,46 @@ export default function Index({ payments, filters = {}, flash = {} }) {
             <Head title="Payments" />
 
             {flash.status && <Alert tone="success" className="mb-4">{flash.status}</Alert>}
+            {flash.error && <Alert tone="error" className="mb-4">{flash.error}</Alert>}
+
+            {/* UI §3.9: the last successful reconciliation must be visible at
+                all times, not only when it is bad news. A figure you have been
+                reading all month is one you notice going wrong. */}
+            <div className="mb-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p className="text-sm text-gray-600">Last successful reconciliation</p>
+                    <p className="mt-1 text-base font-medium text-gray-900">
+                        {reconciliation.never_run
+                            ? 'Never run'
+                            : `${reconciliation.hours_ago} hours ago`}
+                        {reconciliation.stale && (
+                            <span className="ml-2 font-semibold text-overdue-fg">
+                                — overdue, settled payments are not clearing
+                            </span>
+                        )}
+                    </p>
+                </div>
+
+                <button
+                    type="button"
+                    disabled={rerun.processing}
+                    onClick={() => rerun.post('/admin/payments/reconcile', { preserveScroll: true })}
+                    className="inline-flex min-h-touch items-center justify-center rounded-md border border-gray-300 px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-60"
+                >
+                    {rerun.processing ? 'Reconciling…' : 'Reconcile now'}
+                </button>
+            </div>
+
+            {unmatchedCount > 0 && !filters.unmatched && (
+                <Alert tone="warning" className="mb-4" title="Payments needing review">
+                    {unmatchedCount} payment{unmatchedCount === 1 ? ' has' : 's have'} been pending
+                    beyond the reconciliation window. Nothing is voided automatically —{' '}
+                    <Link href="/admin/payments?unmatched=1" className="underline">
+                        review {unmatchedCount === 1 ? 'it' : 'them'}
+                    </Link>
+                    .
+                </Alert>
+            )}
 
             {filters.batch && (
                 <Alert tone="info" className="mb-4" title="Showing one remittance batch">
