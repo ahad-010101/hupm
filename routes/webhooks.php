@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Webhook\AuthorizeNetWebhookController;
 use App\Http\Controllers\Webhook\ResendWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -18,3 +19,11 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::post('/webhooks/resend', ResendWebhookController::class)->name('webhooks.resend');
+
+/*
+ | API-HOOK-01. Supplementary only: this endpoint records the event and marks
+ | the payment for priority reconciliation. It never moves a balance — the
+ | daily settlement job is authoritative (R-6, TDD 9.1).
+ */
+Route::post('/webhooks/authorize-net', AuthorizeNetWebhookController::class)
+    ->name('webhooks.authorize-net');

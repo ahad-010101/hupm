@@ -50,3 +50,17 @@ function something()
 {
     // ..
 }
+
+/**
+ * Today in the COMPANY timezone, not UTC (D-07).
+ *
+ * `now()->toDateString()` is the UTC date, which between 8pm and midnight in
+ * Georgia is *tomorrow* — so a "received today" payload built that way is
+ * rejected as future-dated for four hours out of every twenty-four. The
+ * product resolves every business date through BusinessCalendar; a test that
+ * does not passes all afternoon and fails all evening.
+ */
+function businessToday(): string
+{
+    return app(App\Support\BusinessCalendar::class)->today()->toDateString();
+}

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Payments\AuthorizeNetGateway;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -69,6 +70,7 @@ class Preflight extends Command
         $this->checkRuntimeDrivers();
         $this->checkFilesystem();
         $this->checkOutbound();
+        $this->checkGateway();
         $this->checkScheduler();
 
         $this->render();
@@ -226,6 +228,61 @@ class Preflight extends Command
                 $this->record("outbound https://{$host}", 'UNREACHABLE — '.$spec['why'], false, $spec['required']);
             }
         }
+    }
+
+    /**
+     * Are the Authorize.Net credentials real?  [WP-13]
+     *
+     * Reachability is not the same as usable. `authenticateTestRequest` is the
+     * cheapest call that proves the API Login ID and Transaction Key actually
+     * work — it moves no money and creates nothing.
+     *
+     * The Signature Key is checked separately because it is a different value
+     * that people routinely assume is the Transaction Key, and without it the
+     * webhook endpoint refuses everything.
+     */
+    private function checkGateway(): void
+    {
+        $gateway = app(AuthorizeNetGateway::class);
+
+        if (! $gateway->isConfigured()) {
+            $this->record(
+                'Authorize.Net credentials',
+                'NOT SET - online payments are off until AUTHORIZE_NET_LOGIN_ID and _TRANSACTION_KEY are present',
+                false,
+            );
+
+            return;
+        }
+
+        try {
+            $ok = $gateway->authenticates();
+            $this->record(
+                'Authorize.Net credentials ('.$gateway->environment().')',
+                $ok ? 'accepted' : 'REJECTED - check the API Login ID and Transaction Key',
+                $ok,
+            );
+        } catch (Throwable $e) {
+            $this->record('Authorize.Net credentials', 'UNREACHABLE - '.$e->getMessage(), false);
+        }
+
+        $this->record(
+            'Authorize.Net signature key',
+            config('services.authorize_net.signature_key')
+                ? 'set - the webhook endpoint can verify events'
+                : 'NOT SET - the webhook endpoint will refuse every request',
+            (bool) config('services.authorize_net.signature_key'),
+        );
+
+        // Go-live gate, not a local one: sandbox credentials on the live host
+        // means tenants pay into a test account and no money ever arrives.
+        $this->record(
+            'Authorize.Net environment',
+            $gateway->environment().(app()->environment('production') && $gateway->environment() === 'sandbox'
+                ? ' - SANDBOX ON A PRODUCTION HOST'
+                : ''),
+            ! (app()->environment('production') && $gateway->environment() === 'sandbox'),
+        );
     }
 
     private function checkScheduler(): void

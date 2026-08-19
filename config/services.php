@@ -14,6 +14,23 @@ return [
     |
     */
 
+    /*
+    | Authorize.Net.  [TDD §9.1, WP-13]
+    |
+    | eCheck/ACH only — cards are out of scope for v1 (Q-7). `environment`
+    | picks the endpoints; nothing else in the codebase knows a hostname.
+    |
+    | The Signature Key is NOT the Transaction Key. It is a separate 128-hex
+    | value generated in the merchant interface, and it is the only thing
+    | standing between the webhook endpoint and anyone who can guess the URL.
+    */
+    'authorize_net' => [
+        'login_id' => env('AUTHORIZE_NET_LOGIN_ID'),
+        'transaction_key' => env('AUTHORIZE_NET_TRANSACTION_KEY'),
+        'signature_key' => env('AUTHORIZE_NET_SIGNATURE_KEY'),
+        'environment' => env('AUTHORIZE_NET_ENVIRONMENT', 'sandbox'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

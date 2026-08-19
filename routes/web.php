@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Portal\DocumentController;
+use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -43,6 +44,21 @@ Route::middleware('auth')->group(function () {
                 'pending' => $tenantId ? (string) $balances->pendingPayments($tenantId) : null,
             ]);
         })->name('dashboard');
+        /*
+         | Pay (API-POR-05/06). The throttle is per tenant, not per IP: a
+         | household behind one address is one tenant, and five attempts an
+         | hour is the spec's ceiling on a tenant, not on a router.
+         |
+         | There is no route here that a lease in Management Review can use —
+         | the service refuses as well, because AC-DEL-04 is about someone
+         | constructing the request once the button has gone.
+         */
+        Route::get('/pay', [PortalPaymentController::class, 'show'])->name('pay.show');
+        Route::post('/pay', [PortalPaymentController::class, 'store'])
+            ->middleware('throttle:payments')
+            ->name('pay.store');
+        Route::get('/pay/confirm', [PortalPaymentController::class, 'confirm'])->name('pay.confirm');
+
         Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
         Route::get('/documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
     });

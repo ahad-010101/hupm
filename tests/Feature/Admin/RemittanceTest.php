@@ -145,7 +145,7 @@ it('GATE Q-2 splits one cheque into a payment per tenant, sharing a batch', func
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '1545.86',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'reference' => 'RA-2026-02',
         'note' => '',
         'idempotency_key' => (string) Str::uuid(),
@@ -176,7 +176,7 @@ it('I-4 leaves every tenant balance untouched', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '1545.86',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [
             ['lease_id' => $a->id, 'amount' => '700.00'],
@@ -197,7 +197,7 @@ it('refuses a split that does not add up to the cheque', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '1545.86',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [
             ['lease_id' => $a->id, 'amount' => '700.00'],
@@ -216,7 +216,7 @@ it('says how far off the split is, not just that it is wrong', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '1000.00',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [['lease_id' => $a->id, 'amount' => '700.00']],
     ])->assertSessionHasErrors([
@@ -231,7 +231,7 @@ it('refuses a lease belonging to a different authority', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '1000.00',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [
             ['lease_id' => $ours->id, 'amount' => '700.00'],
@@ -251,7 +251,7 @@ it('drops zero lines rather than writing empty payments', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '700.00',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [
             ['lease_id' => $a->id, 'amount' => '700.00'],
@@ -270,7 +270,7 @@ it('R-13 records one batch when the form is submitted twice', function () {
     $payload = [
         'housing_authority_id' => $this->authority->id,
         'total' => '700.00',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => $key,
         'lines' => [['lease_id' => $a->id, 'amount' => '700.00']],
     ];
@@ -288,7 +288,7 @@ it('audits the batch as a whole, not only the payments inside it', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '700.00',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'reference' => 'RA-2026-02',
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [['lease_id' => $a->id, 'amount' => '700.00']],
@@ -308,7 +308,7 @@ it('lists a batch back on the payments screen', function () {
     $this->post('/admin/payments/remittance', [
         'housing_authority_id' => $this->authority->id,
         'total' => '1545.86',
-        'received_on' => now()->toDateString(),
+        'received_on' => businessToday(),
         'idempotency_key' => (string) Str::uuid(),
         'lines' => [
             ['lease_id' => $a->id, 'amount' => '700.00'],
@@ -332,7 +332,7 @@ it('refuses a tenant', function () {
         ->post('/admin/payments/remittance', [
             'housing_authority_id' => $this->authority->id,
             'total' => '700.00',
-            'received_on' => now()->toDateString(),
+            'received_on' => businessToday(),
             'idempotency_key' => (string) Str::uuid(),
             'lines' => [['lease_id' => $lease->id, 'amount' => '700.00']],
         ])

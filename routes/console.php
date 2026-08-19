@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\CleanupAbandonedPayments;
 use App\Jobs\PostScheduledCharges;
 use Illuminate\Support\Facades\Schedule;
 
@@ -36,6 +37,16 @@ Schedule::job(new PostScheduledCharges)
     ->timezone(config('app.business_timezone', 'America/New_York'))
     ->withoutOverlapping()
     ->name('post-scheduled-charges');
+
+/*
+ | Payments a tenant started and never finished (FR-PAY-01 A1). Hourly rather
+ | than daily so the portal does not show "processing" against money nobody
+ | sent for most of a day. Only touches rows the gateway has never heard of.
+ */
+Schedule::job(new CleanupAbandonedPayments)
+    ->hourly()
+    ->withoutOverlapping()
+    ->name('cleanup-abandoned-payments');
 
 // Drain the queue once a minute and exit. --max-time=50 keeps it comfortably
 // inside the next minute's tick so two workers never overlap; --stop-when-empty

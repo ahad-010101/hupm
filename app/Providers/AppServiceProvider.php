@@ -9,6 +9,8 @@ use App\Support\PermissionMatrix;
 use App\Support\Settings;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Validation\Rules\Password;
@@ -31,6 +33,24 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Vite::prefetch(concurrency: 3);
+
+        // Five payment submissions an hour, per TENANT (WP-13).
+        //
+        // Keyed on the tenant rather than the IP on purpose: a household behind
+        // one address is one tenant, and a shared library computer is several.
+        // An IP limit would punish the second case and miss the first. Falls
+        // back to the IP only when there is no tenant to key on, which cannot
+        // happen behind `role:tenant` but is cheap insurance.
+        RateLimiter::for('payments', function ($request) {
+            $tenantId = $request->user()?->tenant_id;
+
+            return Limit::perHour(5)
+                ->by($tenantId ? 'tenant:'.$tenantId : 'ip:'.$request->ip())
+                ->response(fn () => response()->json([
+                    'message' => 'That is several payment attempts in a short time. '
+                        .'Please wait a little while, or call the office if something is wrong.',
+                ], 429));
+        });
 
         // Company details for the public Blade layout (UI §2.1). A composer
         // rather than View::share so the query runs only when a public page is
