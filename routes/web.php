@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\LedgerController;
+use App\Http\Controllers\Admin\MaintenanceController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\TenantController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\Portal\LedgerController as PortalLedgerController;
+use App\Http\Controllers\Portal\MaintenanceController as PortalMaintenanceController;
 use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -57,6 +59,18 @@ Route::middleware('auth')->group(function () {
             ->middleware('throttle:payments')
             ->name('pay.store');
         Route::get('/pay/confirm', [PortalPaymentController::class, 'confirm'])->name('pay.confirm');
+
+        /*
+         | Maintenance (API-POR-10…14). `new` before `{maintenance}` so the
+         | literal segment cannot be swallowed by the model binding.
+         */
+        Route::get('/maintenance', [PortalMaintenanceController::class, 'index'])->name('maintenance.index');
+        Route::get('/maintenance/new', [PortalMaintenanceController::class, 'create'])->name('maintenance.create');
+        Route::post('/maintenance', [PortalMaintenanceController::class, 'store'])->name('maintenance.store');
+        Route::get('/maintenance/{maintenance}', [PortalMaintenanceController::class, 'show'])
+            ->whereNumber('maintenance')->name('maintenance.show');
+        Route::post('/maintenance/{maintenance}/confirm', [PortalMaintenanceController::class, 'confirm'])
+            ->whereNumber('maintenance')->name('maintenance.confirm');
 
         Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
         Route::get('/documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
@@ -115,6 +129,17 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Maintenance (API-ADM-21…25). The queue is worked from a phone.
+        Route::get('maintenance', [MaintenanceController::class, 'index'])->name('maintenance.index');
+        Route::get('maintenance/{maintenance}', [MaintenanceController::class, 'show'])
+            ->whereNumber('maintenance')->name('maintenance.show');
+        Route::patch('maintenance/{maintenance}/status', [MaintenanceController::class, 'transition'])
+            ->whereNumber('maintenance')->name('maintenance.transition');
+        Route::post('maintenance/{maintenance}/assign', [MaintenanceController::class, 'assign'])
+            ->whereNumber('maintenance')->name('maintenance.assign');
+        Route::post('maintenance/{maintenance}/attachments', [MaintenanceController::class, 'attach'])
+            ->whereNumber('maintenance')->name('maintenance.attach');
 
         // Leases (API-ADM-08…10). Termination is its own action, not a status
         // dropdown: FR-REG-03 needs an effective date and a reason, and it must

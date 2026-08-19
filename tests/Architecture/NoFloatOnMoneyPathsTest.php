@@ -35,6 +35,31 @@ function appPhpFiles(): array
     return $files;
 }
 
+/**
+ * Source with comments removed.
+ *
+ * The same lesson as SoleLedgerWriterTest: a guard that greps documentation
+ * punishes writing any down. A comment explaining *why* number_format() is
+ * banned was itself read as a violation, which teaches people to stop
+ * explaining rules in the code the rules govern.
+ */
+function sourceWithoutComments(string $path): string
+{
+    $code = '';
+
+    foreach (token_get_all(file_get_contents($path)) as $token) {
+        if (is_array($token)) {
+            $code .= in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) ? ' ' : $token[1];
+
+            continue;
+        }
+
+        $code .= $token;
+    }
+
+    return $code;
+}
+
 /** @return list<string> files that handle money */
 function moneyPathFiles(): array
 {
@@ -60,7 +85,7 @@ it('I-10 uses no float cast on any money path', function () {
     $offenders = [];
 
     foreach (moneyPathFiles() as $path) {
-        $source = file_get_contents($path);
+        $source = sourceWithoutComments($path);
 
         foreach ([
             '/\(\s*float\s*\)/i' => '(float) cast',
@@ -90,13 +115,14 @@ it('I-10 declares no float type on a money path', function () {
     $offenders = [];
 
     foreach (moneyPathFiles() as $path) {
-        $source = file_get_contents($path);
+        $source = sourceWithoutComments($path);
 
         // ": float" as a return type, or "float $x" as a parameter.
         if (preg_match('/:\s*\??float\b/', $source) || preg_match('/\bfloat\s+\$/', $source)) {
-            // MoneyCast deliberately names float to reject it; that is the one
-            // legitimate mention.
-            if (! str_contains($source, 'Refusing to store a float')) {
+            // MoneyCast deliberately names float in order to reject it. Its
+            // exemption has to key on code rather than on a comment, now that
+            // comments are stripped before scanning.
+            if (! str_contains($path, '/app/Casts/MoneyCast.php')) {
                 $offenders[] = basename($path);
             }
         }
