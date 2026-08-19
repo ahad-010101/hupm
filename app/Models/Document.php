@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Concerns\Immutable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * A file in the document vault.
@@ -41,5 +43,32 @@ class Document extends Model
         }
 
         return ['is_signed', 'visible_to_tenant', 'title', 'category', 'lease_id'];
+    }
+
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
+    public function lease(): BelongsTo
+    {
+        return $this->belongsTo(Lease::class);
+    }
+
+    /** The version this one replaced, if any (FR-DOC-02). */
+    public function supersedes(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'supersedes_document_id');
+    }
+
+    /** The version that replaced this one, if any. */
+    public function supersededBy(): HasOne
+    {
+        return $this->hasOne(self::class, 'supersedes_document_id');
+    }
+
+    public function uploadedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'uploaded_by_user_id');
     }
 }

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
+use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
 use App\Http\Controllers\Admin\LedgerController;
 use App\Http\Controllers\Admin\MaintenanceController;
 use App\Http\Controllers\Admin\PaymentController;
@@ -73,7 +74,13 @@ Route::middleware('auth')->group(function () {
             ->whereNumber('maintenance')->name('maintenance.confirm');
 
         Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
-        Route::get('/documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
+        Route::get('/documents/{document}', [DocumentController::class, 'show'])
+            ->whereNumber('document')->name('documents.show');
+        // API-POR-16. Signed with a five-minute life (AC-DOC-03) *and* behind
+        // the session and the ownership check — the signature only makes a
+        // copied URL useless, it is not what keeps the file private.
+        Route::get('/documents/{document}/download', [DocumentController::class, 'download'])
+            ->whereNumber('document')->middleware('signed')->name('documents.download');
     });
 
     /*
@@ -129,6 +136,15 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Document vault (API-ADM-26/27). Version history is nested in the
+        // list rather than behind its own endpoint (GAP-2, D-12).
+        Route::get('documents', [AdminDocumentController::class, 'index'])->name('documents.index');
+        Route::post('documents', [AdminDocumentController::class, 'store'])->name('documents.store');
+        Route::post('documents/{document}/replace', [AdminDocumentController::class, 'replace'])
+            ->whereNumber('document')->name('documents.replace');
+        Route::get('documents/{document}/download', [AdminDocumentController::class, 'download'])
+            ->whereNumber('document')->middleware('signed')->name('documents.download');
 
         // Maintenance (API-ADM-21…25). The queue is worked from a phone.
         Route::get('maintenance', [MaintenanceController::class, 'index'])->name('maintenance.index');
