@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
+use App\Http\Controllers\Admin\DelinquencyController;
 use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
 use App\Http\Controllers\Admin\LedgerController;
 use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
@@ -161,6 +162,13 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Management Review (API-ADM-17/18). Release is the only write, it is
+        // manual, and its reason is mandatory (BR-14, AC-DEL-05). There is no
+        // route that puts an account IN — the nightly job does that.
+        Route::get('delinquency', [DelinquencyController::class, 'index'])->name('delinquency.index');
+        Route::post('delinquency/{lease}/release', [DelinquencyController::class, 'release'])
+            ->whereNumber('lease')->name('delinquency.release');
 
         // Signature requests (API-ADM-28/29). No delete: a signed document is
         // superseded, never removed (BR-27, AC-SIG-05).

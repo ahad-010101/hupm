@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\CleanupAbandonedPayments;
+use App\Jobs\EvaluateDelinquency;
 use App\Jobs\PollWeatherAlerts;
 use App\Jobs\PostLateFees;
 use App\Jobs\PostScheduledCharges;
@@ -54,6 +55,21 @@ Schedule::job(new PostLateFees)
     ->timezone(config('app.business_timezone', 'America/New_York'))
     ->withoutOverlapping()
     ->name('post-late-fees');
+
+/*
+ | Management Review (FR-DEL-01). 02:30, AFTER fees at 02:00 and charges at
+ | 01:00 (TDD §8). An account evaluated before its rent has been charged looks
+ | paid up; one evaluated before its late fee has posted is judged on the wrong
+ | balance. That ordering is why these are three jobs rather than one.
+ |
+ | Only ever puts accounts IN. Release is a manual act with a recorded reason
+ | (BR-14), including when the balance reaches zero.
+ */
+Schedule::job(new EvaluateDelinquency)
+    ->dailyAt('02:30')
+    ->timezone(config('app.business_timezone', 'America/New_York'))
+    ->withoutOverlapping()
+    ->name('evaluate-delinquency');
 
 /*
  | Settlement reconciliation (FR-PAY-04). 06:00, after the overnight settlement
