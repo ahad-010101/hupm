@@ -11,6 +11,7 @@ use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
+use App\Http\Controllers\Admin\WeatherAlertController;
 use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\Portal\LedgerController as PortalLedgerController;
@@ -144,6 +145,12 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Weather and emergency alerts (FR-NTF-03). No update or delete: an
+        // alert that was issued was issued.
+        Route::get('alerts', [WeatherAlertController::class, 'index'])->name('alerts.index');
+        Route::post('alerts', [WeatherAlertController::class, 'store'])->name('alerts.store');
+        Route::post('alerts/poll', [WeatherAlertController::class, 'poll'])->name('alerts.poll');
 
         // Notices (API-ADM-30/31). There is deliberately no update and no
         // delete route: a sent notice is the record that a resident was told
