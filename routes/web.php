@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
 use App\Http\Controllers\Admin\MaintenanceController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
+use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Admin\WeatherAlertController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\Portal\LedgerController as PortalLedgerController;
 use App\Http\Controllers\Portal\MaintenanceController as PortalMaintenanceController;
 use App\Http\Controllers\Portal\NoticeController as PortalNoticeController;
 use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
+use App\Http\Controllers\Portal\SignatureController as PortalSignatureController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -75,6 +77,20 @@ Route::middleware('auth')->group(function () {
             ->whereNumber('maintenance')->name('maintenance.show');
         Route::post('/maintenance/{maintenance}/confirm', [PortalMaintenanceController::class, 'confirm'])
             ->whereNumber('maintenance')->name('maintenance.confirm');
+
+        /*
+         | Signing (API-POR-17…19). Ownership failure is 404, never 403: the
+         | existence of someone else's signature request is not a fact to
+         | confirm (I-9).
+         */
+        Route::get('/sign/{signature}', [PortalSignatureController::class, 'show'])
+            ->whereNumber('signature')->name('sign.show');
+        Route::post('/sign/{signature}/consent', [PortalSignatureController::class, 'consent'])
+            ->whereNumber('signature')->name('sign.consent');
+        Route::post('/sign/{signature}/scrolled', [PortalSignatureController::class, 'scrolled'])
+            ->whereNumber('signature')->name('sign.scrolled');
+        Route::post('/sign/{signature}', [PortalSignatureController::class, 'sign'])
+            ->whereNumber('signature')->name('sign.store');
 
         // Notices received (API-POR-20). Scoped from notice_recipients, never
         // from an id in the URL.
@@ -145,6 +161,11 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Signature requests (API-ADM-28/29). No delete: a signed document is
+        // superseded, never removed (BR-27, AC-SIG-05).
+        Route::get('signatures', [AdminSignatureController::class, 'index'])->name('signatures.index');
+        Route::post('signatures', [AdminSignatureController::class, 'store'])->name('signatures.store');
 
         // Weather and emergency alerts (FR-NTF-03). No update or delete: an
         // alert that was issued was issued.
