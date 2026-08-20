@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, usePage } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import Alert from '@/Components/Alert';
 import {
     ArrowUpTrayIcon,
@@ -137,10 +137,19 @@ function SidebarNav({ url, onNavigate, collapsible = false }) {
     );
 }
 
-export default function AdminLayout({ header, exceptionCount = 0, children }) {
+export default function AdminLayout({ header, children }) {
     const { url, props } = usePage();
     const reconciliation = props.reconciliation;
+    // Shared from the server on every admin response, not passed down per page:
+    // a badge that is only right on the dashboard lies on every other screen.
+    const exceptionCount = props.exceptionSummary?.total ?? 0;
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [term, setTerm] = useState(props.results?.term ?? '');
+
+    const submitSearch = (event) => {
+        event.preventDefault();
+        router.get('/admin/search', { q: term });
+    };
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -163,15 +172,22 @@ export default function AdminLayout({ header, exceptionCount = 0, children }) {
                     </Link>
 
                     <div className="ml-auto flex items-center gap-3">
-                        <label htmlFor="admin-search" className="sr-only">
-                            Search tenants, units and ticket numbers
-                        </label>
-                        <input
-                            id="admin-search"
-                            type="search"
-                            placeholder="Search…"
-                            className="hidden w-64 rounded-md border-gray-300 text-base md:block"
-                        />
+                        {/* Submits to a page rather than filtering a dropdown:
+                            results are a place with a URL and a back button. */}
+                        <form onSubmit={submitSearch} className="hidden md:block">
+                            <label htmlFor="admin-search" className="sr-only">
+                                Search residents, units and ticket numbers
+                            </label>
+                            <input
+                                id="admin-search"
+                                name="q"
+                                type="search"
+                                value={term}
+                                onChange={(event) => setTerm(event.target.value)}
+                                placeholder="Search residents, units, tickets…"
+                                className="w-64 rounded-md border-gray-300 text-base"
+                            />
+                        </form>
 
                         <Link
                             href="/admin/exceptions"

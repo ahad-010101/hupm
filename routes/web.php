@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\ArrangementController;
+use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DelinquencyController;
 use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
+use App\Http\Controllers\Admin\ExceptionController;
 use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\LedgerController;
@@ -11,6 +13,7 @@ use App\Http\Controllers\Admin\MaintenanceController;
 use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
+use App\Http\Controllers\Admin\SearchController;
 use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
@@ -114,7 +117,21 @@ Route::middleware('auth')->group(function () {
      | Admin console
      */
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
-        Route::get('/', fn () => Inertia::render('Admin/Dashboard'))->name('dashboard');
+        // API-ADM-01. Exceptions, KPIs and panels — filter state lives in the
+        // query string so a dashboard is a URL somebody can send (AC-ADM-01).
+        Route::get('/', [AdminDashboardController::class, 'index'])->name('dashboard');
+
+        // The exceptions badge in the top bar leads here from every screen.
+        // Acknowledgement is a POST because it records a decision (AC-ADM-02);
+        // there is no route that un-acknowledges, because "I looked at this"
+        // is not a thing that stops being true.
+        Route::get('exceptions', [ExceptionController::class, 'index'])->name('exceptions.index');
+        Route::post('exceptions/acknowledge', [ExceptionController::class, 'acknowledge'])
+            ->name('exceptions.acknowledge');
+
+        // Global search across tenant, unit and ticket number. A page, not an
+        // endpoint: results get a URL and a back button.
+        Route::get('search', SearchController::class)->name('search');
 
         // Cascading address dropdowns for the property form (D-19).
         Route::get('address/states', [AddressLookupController::class, 'states'])->name('address.states');

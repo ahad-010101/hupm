@@ -39,6 +39,38 @@ class BalanceCalculator
     }
 
     /**
+     * Every tenant's balance in one query.  [FR-ADM-01]
+     *
+     * The portfolio dashboard needs 26 balances at once, and 26 round trips to
+     * ask the same question 26 times is the shape that turns into 260 when the
+     * portfolio grows. Same derivation, same statuses, same read-time rule
+     * (I-1) — only the grouping differs.
+     *
+     * Tenants with no ledger rows are absent rather than zero. A caller wanting
+     * "everyone" should start from the tenant list and default the misses,
+     * because "no entries" and "settled up" are different facts.
+     *
+     * @return array<int, Money> Keyed by tenant id.
+     */
+    public function balancesByTenant(string $payer = 'tenant'): array
+    {
+        $rows = DB::table('ledger_entries')
+            ->select('tenant_id', DB::raw('SUM(amount) as total'))
+            ->where('payer', $payer)
+            ->whereIn('status', LedgerService::BALANCE_AFFECTING)
+            ->groupBy('tenant_id')
+            ->get();
+
+        $balances = [];
+
+        foreach ($rows as $row) {
+            $balances[(int) $row->tenant_id] = Money::fromString((string) ($row->total ?: '0'));
+        }
+
+        return $balances;
+    }
+
+    /**
      * Charges with something still outstanding, oldest first.
      *
      * Outstanding = the charge, less allocations that have not been reversed

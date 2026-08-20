@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Domain\Reporting\ExceptionFeed;
 use App\Support\ReconciliationHealth;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -58,6 +59,14 @@ class HandleInertiaRequests extends Middleware
             // so the query runs only for an admin and never on the portal.
             'reconciliation' => fn () => $request->user()?->role === 'admin'
                 ? app(ReconciliationHealth::class)->status()
+                : null,
+
+            // The exceptions badge, for the same reason: the things it counts
+            // are exactly what goes unnoticed until somebody complains, and a
+            // badge that is only right on the dashboard is a badge that lies
+            // on every other screen (UI §3.7, §2.3).
+            'exceptionSummary' => fn () => $request->user()?->role === 'admin'
+                ? app(ExceptionFeed::class)->summary()
                 : null,
         ];
     }

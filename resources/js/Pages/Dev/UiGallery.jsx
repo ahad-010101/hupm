@@ -79,7 +79,7 @@ export default function UiGallery({ layout = 'portal' }) {
     ];
 
     return (
-        <Layout header="Component gallery" balance="-125.00" pendingAmount="75.00" exceptionCount={3}>
+        <Layout header="Component gallery" balance="-125.00" pendingAmount="75.00">
             <Head title="Component gallery" />
 
             <nav aria-label="Gallery layouts" className="mb-6 flex flex-wrap gap-2">
