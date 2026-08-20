@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\HousingAuthorityController;
 use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
 use App\Http\Controllers\Admin\LedgerController;
+use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
 use App\Http\Controllers\Admin\MaintenanceController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\Portal\LedgerController as PortalLedgerController;
 use App\Http\Controllers\Portal\MaintenanceController as PortalMaintenanceController;
+use App\Http\Controllers\Portal\NoticeController as PortalNoticeController;
 use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -72,6 +74,12 @@ Route::middleware('auth')->group(function () {
             ->whereNumber('maintenance')->name('maintenance.show');
         Route::post('/maintenance/{maintenance}/confirm', [PortalMaintenanceController::class, 'confirm'])
             ->whereNumber('maintenance')->name('maintenance.confirm');
+
+        // Notices received (API-POR-20). Scoped from notice_recipients, never
+        // from an id in the URL.
+        Route::get('/notices', [PortalNoticeController::class, 'index'])->name('notices.index');
+        Route::get('/notices/{notice}/attachments/{attachment}', [PortalNoticeController::class, 'attachment'])
+            ->whereNumber(['notice', 'attachment'])->name('notices.attachment');
 
         Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
         Route::get('/documents/{document}', [DocumentController::class, 'show'])
@@ -136,6 +144,18 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Notices (API-ADM-30/31). There is deliberately no update and no
+        // delete route: a sent notice is the record that a resident was told
+        // something (AC-NTF-06).
+        Route::get('notices', [AdminNoticeController::class, 'index'])->name('notices.index');
+        Route::get('notices/new', [AdminNoticeController::class, 'create'])->name('notices.create');
+        Route::post('notices/audience', [AdminNoticeController::class, 'audience'])->name('notices.audience');
+        Route::post('notices', [AdminNoticeController::class, 'store'])->name('notices.store');
+        Route::get('notices/{notice}', [AdminNoticeController::class, 'show'])
+            ->whereNumber('notice')->name('notices.show');
+        Route::get('notices/{notice}/attachments/{attachment}', [AdminNoticeController::class, 'attachment'])
+            ->whereNumber(['notice', 'attachment'])->name('notices.attachment');
 
         // Document vault (API-ADM-26/27). Version history is nested in the
         // list rather than behind its own endpoint (GAP-2, D-12).

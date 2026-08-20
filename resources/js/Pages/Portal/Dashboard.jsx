@@ -185,6 +185,17 @@ export default function Dashboard({
                             </li>
                         ))}
                     </ul>
+
+                    {/* Reached from here rather than from a sixth bottom tab.
+                        Five is already the ceiling for a thumb-reachable bar at
+                        375px, and notices are read rarely — one extra tap beats
+                        shrinking every other target. */}
+                    <Link
+                        href="/portal/notices"
+                        className="mt-3 inline-block text-base underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                    >
+                        Read your notices
+                    </Link>
                 </Card>
             )}
 
