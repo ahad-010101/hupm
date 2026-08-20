@@ -1,13 +1,14 @@
 <?php
 
 use App\Http\Controllers\Admin\AddressLookupController;
-use App\Http\Controllers\Admin\HousingAuthorityController;
-use App\Http\Controllers\Admin\LeaseController;
+use App\Http\Controllers\Admin\ArrangementController;
 use App\Http\Controllers\Admin\DelinquencyController;
 use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
+use App\Http\Controllers\Admin\HousingAuthorityController;
+use App\Http\Controllers\Admin\LeaseController;
 use App\Http\Controllers\Admin\LedgerController;
-use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
 use App\Http\Controllers\Admin\MaintenanceController;
+use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
@@ -162,6 +163,19 @@ Route::middleware('auth')->group(function () {
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
+
+        // Payment arrangements (API-ADM-19/20). Drafting and approving are
+        // separate acts: approval generates the BR-19 agreement and sends it
+        // for signature, which is not something to do by accident.
+        Route::get('arrangements', [ArrangementController::class, 'index'])->name('arrangements.index');
+        Route::post('arrangements', [ArrangementController::class, 'store'])->name('arrangements.store');
+        Route::post('arrangements/{arrangement}/approve', [ArrangementController::class, 'approve'])
+            ->whereNumber('arrangement')->name('arrangements.approve');
+        Route::post('arrangements/{arrangement}/default', [ArrangementController::class, 'markDefaulted'])
+            ->whereNumber('arrangement')->name('arrangements.default');
+        // [GATE C1/Q-1] Marking a ledger reviewed for the current period.
+        Route::post('arrangements/leases/{lease}/review-ledger', [ArrangementController::class, 'reviewLedger'])
+            ->whereNumber('lease')->name('arrangements.review-ledger');
 
         // Management Review (API-ADM-17/18). Release is the only write, it is
         // manual, and its reason is mandatory (BR-14, AC-DEL-05). There is no
