@@ -2,6 +2,7 @@
 
 use App\Jobs\CleanupAbandonedPayments;
 use App\Jobs\PollWeatherAlerts;
+use App\Jobs\PostLateFees;
 use App\Jobs\PostScheduledCharges;
 use App\Jobs\ReconcilePayments;
 use Illuminate\Support\Facades\Schedule;
@@ -39,6 +40,20 @@ Schedule::job(new PostScheduledCharges)
     ->timezone(config('app.business_timezone', 'America/New_York'))
     ->withoutOverlapping()
     ->name('post-scheduled-charges');
+
+/*
+ | Late fees (FR-FEE-01). 02:00, AFTER charge posting at 01:00 — a fee assessed
+ | against a period whose rent has not been charged yet finds nothing
+ | outstanding and skips a lease that is genuinely late (TDD §8).
+ |
+ | Ships doing nothing: `fees.automation_enabled` is false until the client
+ | confirms attorney review of the fee language.
+ */
+Schedule::job(new PostLateFees)
+    ->dailyAt('02:00')
+    ->timezone(config('app.business_timezone', 'America/New_York'))
+    ->withoutOverlapping()
+    ->name('post-late-fees');
 
 /*
  | Settlement reconciliation (FR-PAY-04). 06:00, after the overnight settlement

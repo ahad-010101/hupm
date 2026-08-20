@@ -203,6 +203,26 @@ export default function Form({ lease, tenants, units, authorities, preselectedTe
                         })}
                         {field('returned_payment_fee', 'Returned payment fee', { inputMode: 'decimal', required: true })}
                     </div>
+
+                    {/* A daily fee with no ceiling accrues every night for as
+                        long as the rent is unpaid. Six months of $5 a day is
+                        $900 on top of the rent, which a Georgia magistrate is
+                        unlikely to think reasonable — and it is the kind of
+                        figure nobody notices until it is in a filing. */}
+                    {(() => {
+                        const daily = parseInt(
+                            (formatMoney(data.late_fee_daily || '0').text.replace(/[$,]/g, '').replace('.', '')),
+                            10,
+                        );
+                        const uncapped = String(data.late_fee_max ?? '').trim() === '';
+
+                        return daily > 0 && uncapped ? (
+                            <Alert tone="warning" className="mb-4" title="This daily fee has no ceiling">
+                                A daily fee with no maximum keeps accruing for as long as the rent is
+                                unpaid. Set a maximum unless you have been advised otherwise.
+                            </Alert>
+                        ) : null;
+                    })()}
                 </fieldset>
 
                 <fieldset className="mb-6">

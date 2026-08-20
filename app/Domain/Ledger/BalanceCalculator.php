@@ -89,6 +89,50 @@ class BalanceCalculator
     }
 
     /**
+     * What is still owed, grouped by charge period.
+     *
+     * A different question from outstandingCharges(): the waterfall asks "which
+     * charge next", this asks "is February settled". Late fees are assessed per
+     * period (BR-08/BR-09), so a tenant who paid February but not March is late
+     * on March alone — which one combined balance figure cannot express.
+     *
+     * Rows with no period (an adjustment, a fee posted outside a cycle) are
+     * excluded: they belong to no cycle and cannot make one late.
+     *
+     * @return array<string, Money> period => amount still outstanding
+     */
+    public function outstandingByPeriod(int $tenantId, string $payer = 'tenant'): array
+    {
+        $rows = DB::table('ledger_entries as e')
+            ->leftJoin('payment_allocations as a', function ($join) {
+                $join->on('a.charge_entry_id', '=', 'e.id')->whereNull('a.reversed_at');
+            })
+            ->where('e.tenant_id', $tenantId)
+            ->where('e.payer', $payer)
+            ->whereIn('e.type', ['charge', 'adjustment'])
+            ->whereIn('e.status', LedgerService::BALANCE_AFFECTING)
+            ->whereNotNull('e.period')
+            ->groupBy('e.id', 'e.period', 'e.amount')
+            ->orderBy('e.period')
+            ->get([
+                'e.period', 'e.amount',
+                DB::raw('COALESCE(SUM(a.amount), 0) as allocated'),
+            ]);
+
+        $byPeriod = [];
+
+        foreach ($rows as $row) {
+            $outstanding = Money::fromString((string) $row->amount)
+                ->minus(Money::fromString((string) $row->allocated));
+
+            $byPeriod[$row->period] = ($byPeriod[$row->period] ?? Money::zero())->plus($outstanding);
+        }
+
+        // A period settled by a credit can come out negative; it is not late.
+        return array_filter($byPeriod, fn (Money $amount) => $amount->isPositive());
+    }
+
+    /**
      * Every entry for a payer, with a running total.
      *
      * Ordered by effective date then id, so the running total is reproducible:
