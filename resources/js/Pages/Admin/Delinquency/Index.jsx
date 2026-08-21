@@ -16,15 +16,102 @@ import Money from '@/Components/Money';
  * There is no bulk release, deliberately. Letting somebody out is a decision
  * about one household and it carries a reason that goes on the record.
  */
-export default function Index({ accounts = [], triggerDay = 5, insideGrace = [], flash = {} }) {
+export default function Index({
+    accounts = [],
+    triggerDay = 5,
+    insideGrace = [],
+    waiting = 0,
+    lastEvaluated = null,
+    flash = {},
+}) {
     const [releasing, setReleasing] = useState(null);
+    const [confirming, setConfirming] = useState(false);
     const release = useForm({ reason: '' });
+    const evaluate = useForm({});
+
+    const runEvaluation = () => {
+        setConfirming(false);
+        evaluate.post('/admin/delinquency/evaluate', { preserveScroll: true });
+    };
 
     return (
         <AdminLayout header="Management Review">
             <Head title="Management Review" />
 
             {flash.status && <Alert tone="success" className="mb-4">{flash.status}</Alert>}
+
+            {/* The rule normally runs at 02:30 and nobody presses anything. This
+                is for the morning after a cron that did not fire — and for
+                seeing the rule work rather than taking it on trust. */}
+            <section className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-gray-900">
+                            The nightly review runs at 02:30
+                        </h2>
+                        <p className="text-base text-gray-600">
+                            {lastEvaluated
+                                ? `Last run ${new Date(lastEvaluated).toLocaleString('en-GB', {
+                                      day: 'numeric',
+                                      month: 'long',
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                  })}.`
+                                : 'It has never run on this system.'}{' '}
+                            {waiting === 0
+                                ? 'No account currently meets the rule.'
+                                : `${waiting} account${waiting === 1 ? '' : 's'} would enter review if it ran now.`}
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => setConfirming(true)}
+                        disabled={evaluate.processing}
+                        className="min-h-touch shrink-0 rounded-md border border-gray-300 bg-white px-4 text-base font-medium text-gray-800 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-50"
+                    >
+                        {evaluate.processing ? 'Evaluating…' : 'Run the review now'}
+                    </button>
+                </div>
+
+                {confirming && (
+                    // Confirmed rather than fired on one click: this is not a
+                    // report, it switches off online payment for real
+                    // households. Saying how many, before it happens.
+                    <Alert tone="warning" className="mt-3" title="Run the review now?">
+                        <p className="mb-3">
+                            {waiting === 0
+                                ? 'No account meets the rule at the moment, so this will change nothing.'
+                                : `This will put ${waiting} account${
+                                      waiting === 1 ? '' : 's'
+                                  } into Management Review. Online payment and autopay switch off for ${
+                                      waiting === 1 ? 'that household' : 'those households'
+                                  } until somebody releases ${waiting === 1 ? 'it' : 'them'}, one at a time, with a reason.`}
+                        </p>
+                        <p className="mb-3">
+                            It does exactly what tonight would do, and running it twice changes
+                            nothing the second time.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={runEvaluation}
+                                className="min-h-touch rounded-md bg-brand-600 px-4 text-base font-semibold text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                            >
+                                Yes, run it
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setConfirming(false)}
+                                className="min-h-touch rounded-md border border-gray-300 bg-white px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </Alert>
+                )}
+            </section>
 
             {insideGrace.length > 0 && (
                 <Alert tone="warning" className="mb-4" title="Some leases enter review before their own grace ends">

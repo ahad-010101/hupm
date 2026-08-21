@@ -198,6 +198,11 @@ Route::middleware('auth')->group(function () {
         // manual, and its reason is mandatory (BR-14, AC-DEL-05). There is no
         // route that puts an account IN — the nightly job does that.
         Route::get('delinquency', [DelinquencyController::class, 'index'])->name('delinquency.index');
+        // Run the 02:30 rule now — for the morning after a cron that did not
+        // fire. It only ever puts accounts IN; there is still no route that
+        // takes one out without a reason.
+        Route::post('delinquency/evaluate', [DelinquencyController::class, 'evaluate'])
+            ->name('delinquency.evaluate');
         Route::post('delinquency/{lease}/release', [DelinquencyController::class, 'release'])
             ->whereNumber('lease')->name('delinquency.release');
 

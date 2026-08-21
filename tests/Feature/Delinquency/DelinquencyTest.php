@@ -1,6 +1,7 @@
 <?php
 
 use App\Domain\Delinquency\DelinquencyService;
+use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Ledger\LedgerService;
 use App\Domain\Notifications\NotificationTemplate;
 use App\Jobs\EvaluateDelinquency;
@@ -11,10 +12,13 @@ use App\Models\RecurringPayment;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use App\Support\AuditLogger;
+use App\Support\BusinessCalendar;
 use App\Support\Money;
 use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -93,16 +97,16 @@ function runJobOn(string $date): int
     // BusinessCalendar::today() on the previous day and the job correctly does
     // nothing. The same five hours that stopped WP-10 posting anything at all.
     CarbonImmutable::setTestNow($date.' 12:00:00');
-    Illuminate\Support\Carbon::setTestNow($date.' 12:00:00');
+    Carbon::setTestNow($date.' 12:00:00');
 
     $count = app(EvaluateDelinquency::class)->handle(
         app(DelinquencyService::class),
-        app(App\Support\BusinessCalendar::class),
-        app(App\Support\AuditLogger::class),
+        app(BusinessCalendar::class),
+        app(AuditLogger::class),
     );
 
     CarbonImmutable::setTestNow();
-    Illuminate\Support\Carbon::setTestNow();
+    Carbon::setTestNow();
 
     return $count;
 }
@@ -301,7 +305,7 @@ it('AC-PAY-15 keeps admin-recorded payment working throughout', function () {
         'idempotency_key' => (string) Str::uuid(),
     ])->assertSessionHasNoErrors();
 
-    expect(app(App\Domain\Ledger\BalanceCalculator::class)
+    expect(app(BalanceCalculator::class)
         ->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
 });
 
@@ -401,7 +405,9 @@ it('shows the queue with a number to call and the balance beside it', function (
 
     $props = [];
     $this->actingAs($this->admin)->get('/admin/delinquency')->assertOk()
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     expect($props['accounts'])->toHaveCount(1)
         ->and($props['accounts'][0]['balance'])->toBe('500.00')
@@ -421,11 +427,88 @@ it('flags leases whose own grace outlasts the review trigger', function () {
 
     $props = [];
     $this->actingAs($this->admin)->get('/admin/delinquency')
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     expect($props['insideGrace'])->toHaveCount(1)
         ->and($props['insideGrace'][0]['grace_days'])->toBe(15)
         ->and($props['triggerDay'])->toBe(5);
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Running the rule by hand
+ |--------------------------------------------------------------------------
+ |
+ | The nightly job is the normal path. This exists for the morning after a cron
+ | that did not fire — and it has to go through the job, not the service, so
+ | the screen's "last evaluated" line is true afterwards. The reconciliation
+ | button taught that lesson the expensive way.
+ |
+ */
+
+it('lets an admin run the review by hand, and records the run', function () {
+    oweRent($this->lease);
+    $admin = User::factory()->create(['role' => 'admin']);
+
+    // 06 Feb: the 1st plus a five-day trigger.
+    CarbonImmutable::setTestNow('2026-02-06 12:00:00');
+    Carbon::setTestNow('2026-02-06 12:00:00');
+
+    $this->actingAs($admin)->get('/admin/delinquency')
+        ->assertInertia(fn ($page) => $page
+            ->where('waiting', 1)
+            // Never having run is how you find out the scheduler is not
+            // running at all.
+            ->where('lastEvaluated', null));
+
+    $this->actingAs($admin)->post('/admin/delinquency/evaluate')
+        ->assertRedirect()
+        ->assertSessionHas('status', fn (string $s) => str_contains($s, '1 account entered'));
+
+    expect($this->lease->fresh()->delinquency_state)->toBe(DelinquencyService::STATE_REVIEW)
+        ->and(DB::table('job_runs')->where('job_name', EvaluateDelinquency::class)
+            ->where('status', 'success')->count())->toBe(1);
+
+    $this->actingAs($admin)->get('/admin/delinquency')
+        ->assertInertia(fn ($page) => $page->where('waiting', 0)->whereNot('lastEvaluated', null));
+
+    CarbonImmutable::setTestNow();
+    Carbon::setTestNow();
+});
+
+it('says plainly when running it changes nothing', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+
+    // Nobody owes anything, so the rule matches nobody. Silence here would
+    // read as a broken button.
+    $this->actingAs($admin)->post('/admin/delinquency/evaluate')
+        ->assertSessionHas('status', fn (string $s) => str_contains($s, 'nothing changed'));
+
+    expect($this->lease->fresh()->delinquency_state)->toBe(DelinquencyService::STATE_CURRENT);
+});
+
+it('moves nobody a second time when run twice', function () {
+    oweRent($this->lease);
+    $admin = User::factory()->create(['role' => 'admin']);
+
+    CarbonImmutable::setTestNow('2026-02-06 12:00:00');
+    Carbon::setTestNow('2026-02-06 12:00:00');
+
+    $this->actingAs($admin)->post('/admin/delinquency/evaluate');
+    $this->actingAs($admin)->post('/admin/delinquency/evaluate');
+
+    expect(DB::table('delinquency_events')->count())->toBe(1);
+
+    CarbonImmutable::setTestNow();
+    Carbon::setTestNow();
+});
+
+it('keeps a tenant out of the manual review trigger', function () {
+    $resident = User::factory()->create(['role' => 'tenant', 'tenant_id' => $this->tenant->id]);
+
+    $this->actingAs($resident)->post('/admin/delinquency/evaluate')->assertForbidden();
 });
 
 it('keeps a tenant out of the queue and the release action', function () {
