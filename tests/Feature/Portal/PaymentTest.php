@@ -2,6 +2,9 @@
 
 use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Ledger\LedgerService;
+use App\Domain\Payments\AuthorizeNetGateway;
+use App\Domain\Payments\PaymentIntentService;
+use App\Exceptions\GatewayUnavailableException;
 use App\Jobs\CleanupAbandonedPayments;
 use App\Models\Lease;
 use App\Models\LedgerEntry;
@@ -194,6 +197,24 @@ it('AC-PAY-04 leaves the balance alone when the gateway is unreachable', functio
         ->and($this->balances->pendingPayments($this->tenant->id)->toDecimalString())->toBe('0.00');
 });
 
+it('writes the reason to the log even though the tenant is told something softer', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response('', 503)]);
+
+    Log::shouldReceive('warning')
+        ->once()
+        ->withArgs(function (string $message, array $context) {
+            return str_contains($message, 'could not start a payment')
+                && array_key_exists('lease_id', $context)
+                && array_key_exists('return_url', $context);
+        });
+
+    $this->postJson('/portal/pay', payPayload())->assertStatus(502);
+
+    // A 502 with an empty log is undiagnosable, and on shared hosting "it just
+    // does not work" is the whole bug report. The tenant-facing message stays
+    // soft; the reason has to be written down somewhere.
+});
+
 it('treats a gateway error response as unreachable rather than as a rejection', function () {
     Http::fake(['apitest.authorize.net/*' => Http::response(
         "\xEF\xBB\xBF".json_encode([
@@ -217,7 +238,7 @@ it('I-5 keeps our own credentials out of the log when the gateway echoes them ba
             'resultCode' => 'Error',
             'message' => [[
                 'code' => 'E00003',
-                'text' => "The value &#39;sandbox-login&#39; is invalid. Key sandbox-key rejected.",
+                'text' => 'The value &#39;sandbox-login&#39; is invalid. Key sandbox-key rejected.',
             ]],
         ],
     ]))]);
@@ -225,6 +246,14 @@ it('I-5 keeps our own credentials out of the log when the gateway echoes them ba
     $this->postJson('/portal/pay', payPayload())->assertStatus(502);
 
     Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) {
+        // A failed payment writes more than one warning — the gateway's
+        // rejection and the controller's "a tenant could not start a payment".
+        // Only the first carries the echoed text, so skip the rest rather than
+        // reading a key they do not have.
+        if (! isset($context['text'])) {
+            return false;
+        }
+
         return ! str_contains($context['text'], 'sandbox-login')
             && ! str_contains($context['text'], 'sandbox-key')
             && str_contains($context['text'], '[redacted]')
@@ -240,7 +269,7 @@ it('names the localhost return URL instead of blaming the provider', function ()
     // fixture would have said a word.
     Http::fake();
 
-    $call = fn () => app(App\Domain\Payments\PaymentIntentService::class)->create(
+    $call = fn () => app(PaymentIntentService::class)->create(
         lease: $this->lease,
         amount: Money::fromString('400.00'),
         idempotencyKey: (string) Str::uuid(),
@@ -248,7 +277,7 @@ it('names the localhost return URL instead of blaming the provider', function ()
         cancelUrl: 'http://localhost:8000/portal/pay/confirm?cancelled=1',
     );
 
-    expect($call)->toThrow(App\Exceptions\GatewayUnavailableException::class);
+    expect($call)->toThrow(GatewayUnavailableException::class);
 
     // Nothing sent and nothing written. This is our configuration, not an
     // outage, so there is no failed attempt worth recording (F1 is about the
@@ -260,7 +289,7 @@ it('names the localhost return URL instead of blaming the provider', function ()
 
 it('accepts 127.0.0.1 and a real domain, which is what the gateway allows', function () {
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
-    $gateway = app(App\Domain\Payments\AuthorizeNetGateway::class);
+    $gateway = app(AuthorizeNetGateway::class);
 
     foreach (['http://127.0.0.1:8000/portal/pay/confirm', 'https://hupm.example.com/portal/pay/confirm'] as $url) {
         $gateway->assertUsableReturnUrl($url);
@@ -446,7 +475,7 @@ it('voids a payment the tenant started a day ago and never finished', function (
 
     Payment::sole()->forceFill(['submitted_at' => now()->subHours(30)])->save();
 
-    app(CleanupAbandonedPayments::class)->handle(app(App\Domain\Payments\PaymentIntentService::class));
+    app(CleanupAbandonedPayments::class)->handle(app(PaymentIntentService::class));
 
     expect(Payment::sole()->status)->toBe('void')
         ->and(LedgerEntry::where('type', 'payment')->sole()->status)->toBe('void');
@@ -461,7 +490,7 @@ it('leaves an old payment alone once the gateway knows about it', function () {
         'gateway_transaction_id' => '60123456789',
     ])->save();
 
-    app(CleanupAbandonedPayments::class)->handle(app(App\Domain\Payments\PaymentIntentService::class));
+    app(CleanupAbandonedPayments::class)->handle(app(PaymentIntentService::class));
 
     // ACH over a bank holiday weekend outlasts any naive cutoff. A transaction
     // the gateway has heard of belongs to reconciliation, whatever its age.

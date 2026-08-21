@@ -17,6 +17,7 @@ use App\Support\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -78,6 +79,23 @@ class PaymentController extends Controller
                 cancelUrl: route('portal.pay.confirm', ['cancelled' => 1]),
             );
         } catch (GatewayUnavailableException $e) {
+            // The tenant gets a soft, non-alarming message; the log gets the
+            // reason. Without this line a failed payment is a 502 with nothing
+            // behind it, and the exception already knows exactly what went
+            // wrong — a missing credential, a refused return URL, an HTTP
+            // status. On shared hosting "it just doesn't work" is the entire
+            // bug report you are going to get, so the answer has to already be
+            // written down when it arrives.
+            //
+            // $context never carries bank data by construction (I-5).
+            Log::warning('A tenant could not start a payment.', [
+                'lease_id' => $lease->id,
+                'tenant_id' => $lease->tenant_id,
+                'return_url' => route('portal.pay.confirm'),
+                'detail' => $e->getMessage(),
+                ...$e->context,
+            ]);
+
             // 502, and the message is the one the tenant sees. Nothing has been
             // charged and the balance has not moved (AC-PAY-04).
             return response()->json([
