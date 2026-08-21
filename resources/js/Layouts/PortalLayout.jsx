@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import Money from '@/Components/Money';
+import UserMenu from '@/Components/UserMenu';
 
 /**
  * Tenant portal shell.  [UI §2.2, §6]
@@ -68,21 +69,25 @@ export default function PortalLayout({ balance = null, pendingAmount = null, hea
                         ))}
                     </nav>
 
-                    {balance !== null && (
-                        <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-right">
-                            <span className="sr-only">Current balance: </span>
-                            <Money value={balance} balance className="text-base" />
-                            {/* ACH takes 2–5 business days. Showing the pending
-                                amount beside the balance is what stops a tenant
-                                concluding the payment failed and paying twice
-                                (UI §3.1). */}
-                            {pendingAmount && (
-                                <span className="block text-xs text-gray-600">
-                                    <Money value={pendingAmount} /> processing
-                                </span>
-                            )}
-                        </div>
-                    )}
+                    <div className="ml-auto flex items-center gap-2">
+                        {balance !== null && (
+                            <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-right">
+                                <span className="sr-only">Current balance: </span>
+                                <Money value={balance} balance className="text-base" />
+                                {/* ACH takes 2–5 business days. Showing the pending
+                                    amount beside the balance is what stops a tenant
+                                    concluding the payment failed and paying twice
+                                    (UI §3.1). */}
+                                {pendingAmount && (
+                                    <span className="block text-xs text-gray-600">
+                                        <Money value={pendingAmount} /> processing
+                                    </span>
+                                )}
+                            </div>
+                        )}
+
+                        <UserMenu />
+                    </div>
                 </div>
 
                 {header && (

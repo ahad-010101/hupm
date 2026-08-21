@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, router, usePage } from '@inertiajs/react';
 import Alert from '@/Components/Alert';
+import UserMenu from '@/Components/UserMenu';
 import {
     ArrowUpTrayIcon,
     BanknotesIcon,
@@ -210,6 +211,8 @@ export default function AdminLayout({ header, children }) {
                                 </span>
                             )}
                         </Link>
+
+                        <UserMenu />
                     </div>
                 </div>
             </header>
