@@ -3,6 +3,7 @@
 namespace App\Domain\Notifications;
 
 use App\Jobs\SendNotification;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -26,7 +27,7 @@ class NotificationService
      * @param  array<string, mixed>  $data  Template variables. Never put bank
      *                                      detail here (I-5), and never the
      *                                      housing authority portion (I-4).
-     * @return int  The notification_logs row id.
+     * @return int The notification_logs row id.
      */
     public function send(
         NotificationTemplate $template,
@@ -67,13 +68,49 @@ class NotificationService
         DB::table('notification_logs')->where('id', $logId)->update(array_merge([
             'status' => $status,
         ], $attributes));
+
+        $this->mirrorToNoticeRecipient($logId, $status, $attributes);
+    }
+
+    /**
+     * Carry the outcome across to the notice recipient row, if there is one.
+     *
+     * Every path that learns something about a message — the send job, the
+     * bounce webhook, a failure after three attempts — comes through here, so
+     * this is the one place the two tables can be kept in step. Doing it at the
+     * call sites instead is how they drifted apart in the first place: the
+     * recipient list sat on `queued` for every resident while the log knew
+     * perfectly well what had happened (AC-NTF-04/05).
+     *
+     * `delivered_at` is only ever set by a provider event. We know when we
+     * handed a message over; only the provider knows when it arrived.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function mirrorToNoticeRecipient(int $logId, string $status, array $attributes): void
+    {
+        $update = ['delivery_status' => $status, 'updated_at' => now()];
+
+        foreach (['sent_at', 'provider_message_id', 'error'] as $column) {
+            if (array_key_exists($column, $attributes)) {
+                $update[$column] = $attributes[$column];
+            }
+        }
+
+        if ($status === 'delivered') {
+            $update['delivered_at'] = now();
+        }
+
+        DB::table('notice_recipients')
+            ->where('notification_log_id', $logId)
+            ->update($update);
     }
 
     /**
      * Rows an admin needs to act on: nothing was delivered and nothing will be
      * unless a person intervenes (AC-NTF-03).
      *
-     * @return \Illuminate\Support\Collection<int, object>
+     * @return Collection<int, object>
      */
     public function needingAttention()
     {

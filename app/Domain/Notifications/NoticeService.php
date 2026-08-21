@@ -195,11 +195,18 @@ class NoticeService
             NoticeRecipient::where('notice_id', $notice->id)
                 ->where('tenant_id', $tenant->id)
                 ->update([
+                    // The link, so the outcome can follow. Without it this row
+                    // stays on whatever it was written as while the log learns
+                    // the message was sent, delivered or bounced — which is
+                    // exactly what it used to do.
+                    'notification_log_id' => $logId,
                     // `not_deliverable` is a resident with no address on file,
                     // which an admin has to act on rather than a failure to
                     // retry (Q-4, AC-NTF-03).
                     'delivery_status' => $status === 'not_deliverable' ? 'not_deliverable' : 'queued',
-                    'sent_at' => $status === 'not_deliverable' ? null : now(),
+                    // Not `now()`: nothing has been sent yet. The job sets this
+                    // when the message actually leaves, through markOutcome.
+                    'sent_at' => null,
                     'updated_at' => now(),
                 ]);
         }

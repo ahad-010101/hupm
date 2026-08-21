@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Webhook;
 
+use App\Domain\Notifications\NotificationService;
 use App\Support\AuditLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -86,9 +87,18 @@ class ResendWebhookController
             default => null,
         };
 
-        if ($update !== null) {
-            DB::table('notification_logs')->where('id', $logId)->update($update);
+        if ($update === null) {
+            return;
         }
+
+        // Through the service, not straight at the table: markOutcome() is what
+        // carries the outcome across to the notice recipient row as well, and a
+        // bounce that only reached the log would leave the notice screen still
+        // claiming the message was on its way.
+        $status = $update['status'] ?? DB::table('notification_logs')->where('id', $logId)->value('status');
+        unset($update['status']);
+
+        app(NotificationService::class)->markOutcome($logId, (string) $status, $update);
     }
 
     private function signatureIsValid(Request $request, string $secret): bool

@@ -1,6 +1,9 @@
 <?php
 
 use App\Domain\Notifications\NoticeService;
+use App\Domain\Notifications\NotificationService;
+use App\Domain\Notifications\NotificationTemplate;
+use App\Jobs\SendNotification;
 use App\Models\Lease;
 use App\Models\Notice;
 use App\Models\NoticeRecipient;
@@ -13,6 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -158,6 +162,61 @@ it('AC-NTF-04 writes one recipient row per resident, each with its own status', 
         ->toBe('queued');
 });
 
+it('advances the recipient status once the message actually leaves', function () {
+    // Queue::fake() in beforeEach means the send job never ran in the test
+    // above — which is exactly how this went unnoticed. `queued` was asserted
+    // and nobody asked what came next. The answer was: nothing, ever. The log
+    // learned the message was sent and the recipient row never heard.
+    Mail::fake();
+
+    $this->post('/admin/notices', noticePayload([
+        'confirm_count' => Tenant::where('status', 'active')->count(),
+    ]))->assertSessionHasNoErrors();
+
+    $recipient = NoticeRecipient::where('tenant_id', $this->withLease->id)->sole();
+
+    expect($recipient->delivery_status)->toBe('queued')
+        ->and($recipient->sent_at)->toBeNull()
+        // The link that lets the outcome find its way back.
+        ->and($recipient->notification_log_id)->not->toBeNull();
+
+    // Run the job the faked queue is holding.
+    (new SendNotification(
+        $recipient->notification_log_id,
+        NotificationTemplate::NoticeIssued,
+        $recipient->email,
+        'Water off Tuesday',
+        ['name' => 'Resident', 'subject' => 'Water off Tuesday', 'body' => 'Hello', 'url' => 'http://localhost'],
+    ))->handle(app(NotificationService::class));
+
+    $recipient->refresh();
+
+    expect($recipient->delivery_status)->toBe('sent')
+        ->and($recipient->sent_at)->not->toBeNull();
+});
+
+it('shows a bounce on the notice, not only in the notification log', function () {
+    $this->post('/admin/notices', noticePayload([
+        'confirm_count' => Tenant::where('status', 'active')->count(),
+    ]))->assertSessionHasNoErrors();
+
+    $recipient = NoticeRecipient::where('tenant_id', $this->withLease->id)->sole();
+
+    // A bounce arrives hours later carrying only the provider's id, and lands
+    // on the log. If it stops there, the notice screen goes on saying the
+    // message is on its way to an address that does not exist (AC-NTF-05).
+    app(NotificationService::class)->markOutcome(
+        $recipient->notification_log_id,
+        'bounced',
+        ['error' => 'Mailbox does not exist.'],
+    );
+
+    $recipient->refresh();
+
+    expect($recipient->delivery_status)->toBe('bounced')
+        ->and($recipient->error)->toContain('does not exist');
+});
+
 it('resolves a property audience to everyone living there', function () {
     $this->post('/admin/notices', noticePayload([
         'audience_type' => 'property',
@@ -253,7 +312,7 @@ it('AC-NTF-06 refuses to delete a sent notice', function () {
 });
 
 it('exposes no route that edits or deletes a notice', function () {
-    $offending = collect(Illuminate\Support\Facades\Route::getRoutes())
+    $offending = collect(Route::getRoutes())
         ->filter(fn ($route) => str_contains($route->uri(), 'notices')
             && array_intersect($route->methods(), ['PUT', 'PATCH', 'DELETE']) !== []);
 
@@ -278,7 +337,9 @@ it('AC-NTF-05 keeps date, audience, recipients, statuses and attachments visible
 
     $props = [];
     $this->get('/admin/notices/'.Notice::sole()->id)->assertOk()
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     expect($props['notice']['sent_on'])->not->toBeNull()
         ->and($props['notice']['sent_by'])->toBe('Office')
@@ -339,7 +400,9 @@ it('shows a resident only the notices addressed to them', function () {
 
     $props = [];
     $this->actingAs($reader)->get('/portal/notices')->assertOk()
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     expect($props['notices'])->toBeEmpty();
 });
