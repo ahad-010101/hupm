@@ -68,6 +68,38 @@ class LedgerEntry extends Model
         return $this->hasOne(self::class, 'reverses_entry_id');
     }
 
+    /**
+     * The payment this entry records, if it records one.
+     *
+     * Read-only from here — a ledger entry never writes a payment, and the
+     * reverse relation is what the payment side uses. The portal needs it to
+     * tell "in flight with a bank" apart from "a form somebody opened".
+     */
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(Payment::class);
+    }
+
+    /**
+     * Positive evidence that this pending payment never reached the gateway.
+     *
+     * Authorize.Net issues a transaction id only when the hosted form is
+     * actually submitted, so a payment row without one was started and not
+     * finished. Telling that tenant their money is "processing" is how somebody
+     * goes further into arrears believing they had paid.
+     *
+     * **Requires the payment row**, deliberately. A pending entry with no
+     * payment behind it — an opening balance import, a hand-posted correction —
+     * tells us nothing either way, and the neutral wording is the honest answer
+     * to a question we cannot answer.
+     */
+    public function isUnconfirmedPayment(): bool
+    {
+        return $this->status === 'pending'
+            && $this->payment !== null
+            && $this->payment->gateway_transaction_id === null;
+    }
+
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');

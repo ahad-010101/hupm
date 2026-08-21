@@ -57,8 +57,12 @@ export default function Dashboard({
     manager = {},
     orphaned = false,
 }) {
-    const { balance, pending, error } = balances;
+    const { balance, pending, unconfirmed, error } = balances;
     const hasPending = pending && pending !== '0.00';
+    // An attempt the gateway never heard of. Same money, different sentence —
+    // "nothing more to do" is exactly the wrong thing to tell someone who
+    // opened the payment form and closed it again.
+    const isUnconfirmed = hasPending && unconfirmed && unconfirmed === pending;
 
     if (orphaned) {
         return (
@@ -122,8 +126,20 @@ export default function Dashboard({
 
                             {hasPending && (
                                 <p className="mt-2 text-base text-gray-700">
-                                    <Money value={pending} /> is processing and will come off this
-                                    balance once it clears with your bank. Nothing more to do.
+                                    {isUnconfirmed ? (
+                                        <>
+                                            You started a payment of <Money value={pending} /> but we
+                                            have not had confirmation from your bank. If you did not
+                                            finish it, nothing has been taken — you can start again
+                                            below.
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Money value={pending} /> is processing and will come off
+                                            this balance once it clears with your bank. Nothing more
+                                            to do.
+                                        </>
+                                    )}
                                 </p>
                             )}
 

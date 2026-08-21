@@ -183,6 +183,34 @@ it('offers no card option — cards are out of scope for v1', function () {
  |--------------------------------------------------------------------------
  */
 
+it('does not tell a tenant there is nothing more to do about a payment nobody submitted', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'hosted-token-abc']))]);
+
+    // Opened the hosted form and closed the tab. Authorize.Net issues a
+    // transaction id only on submit, so its absence is what tells us this
+    // money is not in flight with anyone's bank.
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    expect(Payment::sole()->gateway_transaction_id)->toBeNull();
+
+    $this->get('/portal')->assertInertia(fn ($page) => $page
+        // Still counted as pending, so nobody is invited to pay twice (I-6)...
+        ->where('balances.pending', '500.00')
+        // ...but flagged as unconfirmed, so the wording can differ.
+        ->where('balances.unconfirmed', '500.00'));
+});
+
+it('calls a payment the gateway has heard of what it is: processing', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'hosted-token-abc']))]);
+
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+    Payment::sole()->forceFill(['gateway_transaction_id' => '60000123'])->save();
+
+    $this->get('/portal')->assertInertia(fn ($page) => $page
+        ->where('balances.pending', '500.00')
+        ->where('balances.unconfirmed', '0.00'));
+});
+
 it('AC-PAY-04 leaves the balance alone when the gateway is unreachable', function () {
     Http::fake(['apitest.authorize.net/*' => Http::response('', 503)]);
 
@@ -351,10 +379,10 @@ it('always allows paying the whole balance, whatever the policy says', function 
     $this->postJson('/portal/pay', payPayload(['amount' => '500.00']))->assertOk();
 });
 
-it('rate limits to five attempts an hour per tenant', function () {
+it('rate limits to fifteen attempts an hour per tenant', function () {
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
 
-    for ($i = 0; $i < 5; $i++) {
+    for ($i = 0; $i < 15; $i++) {
         $this->postJson('/portal/pay', payPayload())->assertOk();
     }
 

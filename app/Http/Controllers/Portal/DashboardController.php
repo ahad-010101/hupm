@@ -6,11 +6,13 @@ use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Reporting\TenantAccountSummary;
 use App\Http\Controllers\Controller;
 use App\Models\Document;
+use App\Models\Lease;
 use App\Models\LedgerEntry;
 use App\Models\Tenant;
 use App\Support\Money;
 use App\Support\Settings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -90,6 +92,7 @@ class DashboardController extends Controller
     private function recentActivity(Tenant $tenant): array
     {
         return LedgerEntry::query()
+            ->with('payment:id,gateway_transaction_id')
             ->where('tenant_id', $tenant->id)
             // AC-POR-03. Not a display filter — the authority's rows never
             // leave the database on this request.
@@ -111,7 +114,7 @@ class DashboardController extends Controller
                 'amount' => (string) $entry->amount,
                 'status' => $entry->status,
                 'counts' => $entry->affectsBalance(),
-                'state' => self::stateLabel($entry->status),
+                'state' => self::stateLabel($entry->status, ! $entry->isUnconfirmedPayment()),
             ])
             ->all();
     }
@@ -121,11 +124,19 @@ class DashboardController extends Controller
      *
      * "Processing" belongs to `pending` alone. A returned payment is a fact the
      * tenant needs stated plainly, and neither is ever called "failed" (UI §8).
+     *
+     * `$confirmed` is false when the gateway has never heard of the payment —
+     * a form somebody opened and did not submit. Calling that "processing"
+     * tells a resident their money is on its way to us when nothing was ever
+     * sent, and the same screen is meanwhile telling them they are past due.
      */
-    public static function stateLabel(string $status): ?string
+    public static function stateLabel(string $status, bool $confirmed = true): ?string
     {
+        if ($status === 'pending') {
+            return $confirmed ? 'processing' : 'not completed';
+        }
+
         return match ($status) {
-            'pending' => 'processing',
             'returned' => 'returned by your bank',
             default => null,
         };
@@ -171,7 +182,7 @@ class DashboardController extends Controller
                 'id' => $row->id,
                 'subject' => $row->subject,
                 'sent_on' => $row->sent_at
-                    ? \Illuminate\Support\Carbon::parse($row->sent_at)->format('j F Y')
+                    ? Carbon::parse($row->sent_at)->format('j F Y')
                     : null,
             ])
             ->all();
@@ -186,7 +197,7 @@ class DashboardController extends Controller
      *
      * @return array<int, array<string, mixed>>
      */
-    private function weatherAlerts(?\App\Models\Lease $lease): array
+    private function weatherAlerts(?Lease $lease): array
     {
         $propertyId = $lease?->unit?->property_id;
 

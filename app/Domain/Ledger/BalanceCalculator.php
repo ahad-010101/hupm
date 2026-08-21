@@ -176,6 +176,10 @@ class BalanceCalculator
     public function runningBalance(int $tenantId, string $payer = 'tenant'): Collection
     {
         $entries = LedgerEntry::query()
+            // Eager, because the caller needs to tell a payment the gateway has
+            // heard of from one it has not, and asking per row is an N+1 on the
+            // longest list in the portal.
+            ->with('payment:id,gateway_transaction_id')
             ->where('tenant_id', $tenantId)
             ->where('payer', $payer)
             ->orderBy('posted_on')
@@ -211,6 +215,36 @@ class BalanceCalculator
             ->sum('amount');
 
         // Stored negative; presented as a positive "processing" figure.
+        return Money::fromString((string) ($total ?: '0'))->absolute();
+    }
+
+    /**
+     * The part of `pendingPayments()` the gateway has never heard of.
+     *
+     * A tenant who opens the hosted form and closes the tab leaves a pending
+     * payment behind. It affects no balance (BR-05), but it is **not** money in
+     * flight with anybody's bank, and telling someone their payment is
+     * "processing — nothing more to do" when they never submitted it is how a
+     * resident ends up further into arrears believing they had paid.
+     *
+     * The tell is the transaction id: Authorize.Net issues one only when the
+     * form is actually submitted. Its absence is not proof of abandonment —
+     * they may have submitted seconds ago and not landed back on the confirm
+     * page yet — which is why this is a separate figure and not a deduction
+     * from the one above. The amount still counts as pending, so nobody is
+     * invited to pay twice; only the wording changes.
+     */
+    public function unconfirmedPayments(int $tenantId): Money
+    {
+        $total = DB::table('ledger_entries as e')
+            ->join('payments as p', 'p.id', '=', 'e.payment_id')
+            ->where('e.tenant_id', $tenantId)
+            ->where('e.payer', 'tenant')
+            ->where('e.type', 'payment')
+            ->where('e.status', 'pending')
+            ->whereNull('p.gateway_transaction_id')
+            ->sum('e.amount');
+
         return Money::fromString((string) ($total ?: '0'))->absolute();
     }
 

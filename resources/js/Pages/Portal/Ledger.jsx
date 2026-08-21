@@ -16,7 +16,7 @@ import Money from '@/Components/Money';
  * sideways on a 375px screen hides the column that matters, which is the one
  * on the right.
  */
-export default function Ledger({ entries = [], balance, pending, filters = {} }) {
+export default function Ledger({ entries = [], balance, pending, unconfirmed, filters = {} }) {
     const [from, setFrom] = useState(filters.from ?? '');
     const [to, setTo] = useState(filters.to ?? '');
 
@@ -45,8 +45,17 @@ export default function Ledger({ entries = [], balance, pending, filters = {} })
                 </p>
                 {hasPending && (
                     <p className="mt-2 text-base text-gray-700">
-                        <Money value={pending} /> is processing and will come off once it clears
-                        with your bank.
+                        {unconfirmed === pending ? (
+                            <>
+                                You started a payment of <Money value={pending} /> that we have no
+                                confirmation for. If you did not finish it, nothing has been taken.
+                            </>
+                        ) : (
+                            <>
+                                <Money value={pending} /> is processing and will come off once it
+                                clears with your bank.
+                            </>
+                        )}
                     </p>
                 )}
             </section>

@@ -50,6 +50,10 @@ class PaymentController extends Controller
             // AC-LED-02 / I-4: the tenant portion. There is no other figure here.
             'balance' => $tenant ? (string) $this->balances->tenantBalance($tenant->id) : null,
             'pending' => $tenant ? (string) $this->balances->pendingPayments($tenant->id) : null,
+            // The slice of that the gateway has never heard of, so the
+            // screen can say "we have no confirmation" rather than
+            // "already processing" about a form nobody submitted.
+            'unconfirmed' => $tenant ? (string) $this->balances->unconfirmedPayments($tenant->id) : null,
             'hasLease' => $lease !== null,
             'leaseId' => $lease?->id,
             // AC-PAY-03: the form is replaced, not disabled — a disabled form

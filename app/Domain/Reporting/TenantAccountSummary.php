@@ -52,7 +52,13 @@ class TenantAccountSummary
      * time. One combined figure would be arithmetically defensible and
      * practically expensive.
      *
-     * @return array{balance: ?string, pending: ?string, error: ?string}
+     * `unconfirmed` is the slice of `pending` the gateway has never heard of —
+     * an attempt somebody started and did not finish. It changes the wording
+     * and nothing else: the money still counts as pending, so nobody is invited
+     * to pay a second time, but they are not told "nothing more to do" about a
+     * payment that was never submitted.
+     *
+     * @return array{balance: ?string, pending: ?string, unconfirmed: ?string, error: ?string}
      */
     public function balances(Tenant $tenant): array
     {
@@ -60,6 +66,7 @@ class TenantAccountSummary
             return [
                 'balance' => (string) $this->balances->tenantBalance($tenant->id),
                 'pending' => (string) $this->balances->pendingPayments($tenant->id),
+                'unconfirmed' => (string) $this->balances->unconfirmedPayments($tenant->id),
                 'error' => null,
             ];
         } catch (\Throwable $e) {
@@ -71,6 +78,7 @@ class TenantAccountSummary
             return [
                 'balance' => null,
                 'pending' => null,
+                'unconfirmed' => null,
                 'error' => 'We could not work out your balance just now. '
                     .'Please refresh, or contact the office and we will tell you what is owed.',
             ];

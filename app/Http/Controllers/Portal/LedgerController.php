@@ -47,6 +47,7 @@ class LedgerController extends Controller
             'entries' => $tenant ? $this->entries($tenant, $from, $to) : [],
             'balance' => $tenant ? (string) $this->balances->tenantBalance($tenant->id) : null,
             'pending' => $tenant ? (string) $this->balances->pendingPayments($tenant->id) : null,
+            'unconfirmed' => $tenant ? (string) $this->balances->unconfirmedPayments($tenant->id) : null,
             'filters' => [
                 'from' => $from?->toDateString(),
                 'to' => $to?->toDateString(),
@@ -102,6 +103,10 @@ class LedgerController extends Controller
     private function entries(Tenant $tenant, ?CarbonImmutable $from, ?CarbonImmutable $to): array
     {
         $query = LedgerEntry::query()
+            // Needed to tell a payment in flight with a bank from a form
+            // somebody opened and left. Eager, or it is an N+1 down the
+            // longest list the portal renders.
+            ->with('payment:id,gateway_transaction_id')
             ->where('tenant_id', $tenant->id)
             // AC-POR-03.
             ->where('payer', 'tenant')
@@ -156,7 +161,7 @@ class LedgerController extends Controller
                 'status' => $entry->status,
                 // BR-05: shown, but it has not moved the balance yet.
                 'counts' => $entry->affectsBalance(),
-                'state' => DashboardController::stateLabel($entry->status),
+                'state' => DashboardController::stateLabel($entry->status, ! $entry->isUnconfirmedPayment()),
             ];
         }
 

@@ -36,6 +36,7 @@ function toCents(value) {
 export default function Pay({
     balance,
     pending,
+    unconfirmed,
     hasLease,
     inManagementReview,
     officePhone,
@@ -166,10 +167,22 @@ export default function Pay({
                         {pending && pending !== '0.00' && (
                             // The single most important line on the screen. A
                             // tenant who cannot see their payment in flight pays
-                            // a second time (UI §3.1).
+                            // a second time (UI §3.1) — but one we cannot
+                            // confirm must not be described as in flight, or
+                            // they will not pay at all.
                             <p className="mt-2 text-base text-gray-700">
-                                <Money value={pending} /> is already processing and will come off this
-                                balance once it clears with your bank.
+                                {unconfirmed === pending ? (
+                                    <>
+                                        You started a payment of <Money value={pending} /> that we
+                                        have no confirmation for. If you did not finish it, nothing
+                                        has been taken.
+                                    </>
+                                ) : (
+                                    <>
+                                        <Money value={pending} /> is already processing and will come
+                                        off this balance once it clears with your bank.
+                                    </>
+                                )}
                             </p>
                         )}
                     </section>

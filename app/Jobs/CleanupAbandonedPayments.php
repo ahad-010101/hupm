@@ -25,7 +25,20 @@ class CleanupAbandonedPayments implements ShouldQueue
     use Queueable;
     use RecordsJobRun;
 
-    /** Comfortably longer than anyone spends filling in a bank form. */
+    /**
+     * Comfortably longer than anyone spends filling in a bank form.
+     *
+     * **Do not shorten this to the token lifetime.** The Accept Hosted token
+     * expires after fourteen minutes, so it looks safe to void an unsubmitted
+     * payment shortly after that — the form it belonged to can no longer be
+     * used. It is not safe. A tenant who submits at minute thirteen leaves us
+     * with a real transaction we have not learned about yet, and
+     * ReconciliationService treats a `void` payment as terminal: it clears the
+     * flag and returns without settling. Voiding before reconciliation has had
+     * a look would take somebody's money and never credit it.
+     *
+     * Twenty-four hours is what gives the 06:00 run first refusal.
+     */
     private const ABANDONED_AFTER_HOURS = 24;
 
     public function handle(PaymentIntentService $intents): int

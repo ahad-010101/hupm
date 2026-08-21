@@ -7,14 +7,14 @@ use App\Support\AuditLogger;
 use App\Support\BusinessCalendar;
 use App\Support\PermissionMatrix;
 use App\Support\Settings;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Vite;
-use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -44,7 +44,7 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('payments', function ($request) {
             $tenantId = $request->user()?->tenant_id;
 
-            return Limit::perHour(5)
+            return Limit::perHour(15)
                 ->by($tenantId ? 'tenant:'.$tenantId : 'ip:'.$request->ip())
                 ->response(fn () => response()->json([
                     'message' => 'That is several payment attempts in a short time. '
