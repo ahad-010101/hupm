@@ -112,7 +112,7 @@ class AuthorizeNetGateway
 
         if (! is_string($token) || $token === '') {
             throw new GatewayUnavailableException(
-                'We could not open the secure payment form.',
+                'We could not open the secure payment form. Nothing has been charged. Please try again shortly.',
                 ['payment_id' => $payment->id],
             );
         }
@@ -145,7 +145,7 @@ class AuthorizeNetGateway
         }
 
         throw new GatewayUnavailableException(
-            'Online payments are not switched on yet.',
+            GatewayUnavailableException::NOT_AVAILABLE,
             [
                 'reason' => 'APP_URL uses localhost, which Authorize.Net rejects as a return URL. '
                     .'Set APP_URL to http://127.0.0.1:8000 locally, or a real domain.',
@@ -442,7 +442,7 @@ class AuthorizeNetGateway
     {
         if (! $this->isConfigured()) {
             throw new GatewayUnavailableException(
-                'Online payments are not switched on yet.',
+                GatewayUnavailableException::NOT_AVAILABLE,
                 ['reason' => 'missing credentials'],
             );
         }
@@ -503,6 +503,7 @@ class AuthorizeNetGateway
         }
 
         if (($decoded['messages']['resultCode'] ?? null) !== 'Ok') {
+            /** @var array<string, mixed> $message */
             $message = $decoded['messages']['message'][0] ?? [];
 
             // Logged without the payload: the request carries a customer
@@ -520,12 +521,41 @@ class AuthorizeNetGateway
                 'text' => $this->redact((string) ($message['text'] ?? '')),
             ]);
 
-            throw new GatewayUnavailableException(context: [
-                'request' => $requestName,
-                'code' => $message['code'] ?? null,
-            ]);
+            throw new GatewayUnavailableException(
+                $this->tenantMessageFor($message),
+                [
+                    'request' => $requestName,
+                    'code' => $message['code'] ?? null,
+                ],
+            );
         }
 
         return $decoded;
+    }
+
+    /**
+     * Which of the tenant-safe messages fits this rejection.
+     *
+     * Only the duplicate is singled out, because it is the only rejection whose
+     * correct advice is the opposite of the default. Everything else really is
+     * "we could not get an answer, nothing was charged, try shortly".
+     *
+     * Matched on the **text** as well as the code. A duplicate surfaces as
+     * `E00027` at the API level and as reason code `11` inside a transaction
+     * response, depending on where in the flow it is refused; the word is the
+     * one thing present in every version of it.
+     *
+     * @param  array<string, mixed>  $message
+     */
+    private function tenantMessageFor(array $message): string
+    {
+        $code = (string) ($message['code'] ?? '');
+        $text = strtolower((string) ($message['text'] ?? ''));
+
+        if ($code === '11' || str_contains($text, 'duplicate')) {
+            return GatewayUnavailableException::DUPLICATE;
+        }
+
+        return GatewayUnavailableException::OUTAGE;
     }
 }

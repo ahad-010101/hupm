@@ -56,6 +56,41 @@ export default function PayResult({ state, amount, reference, balance }) {
                 </section>
             )}
 
+            {state === 'unconfirmed' && (
+                <section className="rounded-lg border border-gray-200 bg-white p-6">
+                    {/* Neither "submitted" nor "failed" — we genuinely do not
+                        know, and the honest version is the safe one. A tenant
+                        told this went through when their bank refused it will
+                        not pay; one told it failed when it did will pay twice
+                        (UI §8). */}
+                    <Alert tone="warning" title="We have not had confirmation">
+                        Your payment of <Money value={amount} /> has not been confirmed by your bank.
+                        If the payment page showed you an error, nothing has been taken.
+                    </Alert>
+
+                    <p className="mt-4 text-base text-gray-700">
+                        Your balance is unchanged at <Money value={balance} balance />. Please check
+                        your bank before trying again, in case the payment did go through — or call
+                        the office and we will look at it with you.
+                    </p>
+
+                    <div className="mt-4 flex flex-wrap gap-3">
+                        <Link
+                            href="/portal/pay"
+                            className="inline-flex min-h-touch items-center rounded-md border border-gray-300 px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                        >
+                            Try again
+                        </Link>
+                        <Link
+                            href="/portal"
+                            className="inline-flex min-h-touch items-center rounded-md border border-gray-300 px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                        >
+                            Back to your account
+                        </Link>
+                    </div>
+                </section>
+            )}
+
             {state === 'cancelled' && (
                 <section className="rounded-lg border border-gray-200 bg-white p-6">
                     <Alert tone="info" title="Payment cancelled">

@@ -100,11 +100,14 @@ class PaymentController extends Controller
                 ...$e->context,
             ]);
 
-            // 502, and the message is the one the tenant sees. Nothing has been
-            // charged and the balance has not moved (AC-PAY-04).
-            return response()->json([
-                'message' => "We couldn't reach the payment provider. Nothing has been charged. Please try again shortly.",
-            ], 502);
+            // 502, and the exception's own message is what the tenant sees.
+            // Every one of them is written to be safe to show; hard-coding an
+            // outage sentence here used to flatten a duplicate rejection into
+            // "nothing has been charged, try again shortly", which is the one
+            // piece of advice that can make somebody pay their rent twice.
+            //
+            // The balance has not moved either way (AC-PAY-04).
+            return response()->json(['message' => $e->getMessage()], 502);
         }
 
         return response()->json([
@@ -138,7 +141,17 @@ class PaymentController extends Controller
         }
 
         return Inertia::render('Portal/PayResult', [
-            'state' => $cancelled ? 'cancelled' : ($payment ? 'submitted' : 'unknown'),
+            // "Submitted" is a claim, and it needs the transaction id to back
+            // it. Coming back without one means the gateway refused the form —
+            // a duplicate, a rejected account — or never handed the id over.
+            // Either way we cannot honestly say the payment is on its way, and
+            // a green "Payment submitted" for a declined transaction is the
+            // worst thing on this screen.
+            'state' => $cancelled
+                ? 'cancelled'
+                : ($payment
+                    ? ($payment->gateway_transaction_id ? 'submitted' : 'unconfirmed')
+                    : 'unknown'),
             'amount' => $payment && ! $cancelled ? (string) $payment->amount : null,
             'reference' => $payment && ! $cancelled ? $payment->id : null,
             'balance' => $tenant ? (string) $this->balances->tenantBalance($tenant->id) : null,

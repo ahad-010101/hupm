@@ -243,6 +243,41 @@ it('writes the reason to the log even though the tenant is told something softer
     // soft; the reason has to be written down somewhere.
 });
 
+it('does not tell a tenant to try again when the gateway calls it a duplicate', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody([
+        'messages' => [
+            'resultCode' => 'Error',
+            'message' => [['code' => '11', 'text' => 'A duplicate transaction has been submitted.']],
+        ],
+    ]))]);
+
+    $message = $this->postJson('/portal/pay', payPayload())->assertStatus(502)->json('message');
+
+    // The first attempt may well have gone through. "Nothing has been charged,
+    // try again shortly" is the one sentence that turns this into paying the
+    // rent twice (AC-PAY-02, I-6).
+    expect($message)->toContain('just been submitted')
+        ->and($message)->toContain('check your account')
+        ->and($message)->not->toContain('Nothing has been charged');
+});
+
+it('does not call a payment submitted when it came back without a transaction id', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'hosted-token-abc']))]);
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    // Refused on Authorize.Net's own page — a duplicate, a rejected account —
+    // so the tenant comes back with nothing to show for it.
+    $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page
+        ->component('Portal/PayResult')
+        ->where('state', 'unconfirmed'));
+
+    // And with one, it is a submission and may be called one.
+    Payment::sole()->forceFill(['gateway_transaction_id' => '60000456'])->save();
+
+    $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page
+        ->where('state', 'submitted'));
+});
+
 it('treats a gateway error response as unreachable rather than as a rejection', function () {
     Http::fake(['apitest.authorize.net/*' => Http::response(
         "\xEF\xBB\xBF".json_encode([
