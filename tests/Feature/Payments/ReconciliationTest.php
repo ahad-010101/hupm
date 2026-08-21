@@ -13,8 +13,10 @@ use App\Models\PaymentProfile;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use App\Support\AuditLogger;
 use App\Support\Money;
 use App\Support\ReconciliationHealth;
+use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -318,8 +320,8 @@ it('emails the tenant about a return without ever saying "failed"', function () 
 });
 
 it('GATE Q-9 posts no returned fee when the setting is off', function () {
-    app(App\Support\Settings::class)->set('fees.returned_fee_automatic', false);
-    app(App\Support\Settings::class)->flush();
+    app(Settings::class)->set('fees.returned_fee_automatic', false);
+    app(Settings::class)->flush();
 
     pendingEcheck();
     $this->batches = ['B-900' => [settledTransaction('60123456789', [
@@ -470,7 +472,7 @@ it('records every run, so a cron that never fires is visible', function () {
 
     app(ReconcilePayments::class)->handle(
         app(ReconciliationService::class),
-        app(App\Support\AuditLogger::class),
+        app(AuditLogger::class),
     );
 
     $run = DB::table('job_runs')->where('job_name', ReconcilePayments::class)->sole();
@@ -520,7 +522,7 @@ it('a failed run leaves a failed record rather than silence', function () {
     try {
         app(ReconcilePayments::class)->handle(
             app(ReconciliationService::class),
-            app(App\Support\AuditLogger::class),
+            app(AuditLogger::class),
         );
     } catch (Throwable) {
         // The job is meant to fail loudly here.
@@ -547,6 +549,34 @@ it('API-ADM-16 lets an admin reconcile by hand, using the same service', functio
         ->assertSessionHas('status', fn (string $s) => str_contains($s, '1 settled'));
 
     expect($payment->fresh()->status)->toBe('settled');
+});
+
+it('R-6 clears the staleness banner when an admin runs it by hand', function () {
+    // The banner tells the admin to run it by hand. Running it by hand used to
+    // record nothing, because the button called the service while the freshness
+    // check reads what the *job* writes — so the banner stayed up however many
+    // times it was pressed. An alarm whose own remedy cannot silence it is an
+    // alarm people learn to ignore.
+    DB::table('job_runs')->insert([
+        'job_name' => ReconcilePayments::class,
+        'started_at' => now()->subHours(62),
+        'finished_at' => now()->subHours(62),
+        'status' => 'success',
+        'records_processed' => 0,
+        'created_at' => now()->subHours(62),
+    ]);
+
+    $admin = User::factory()->create(['role' => 'admin']);
+
+    expect(app(ReconciliationHealth::class)->status()['stale'])->toBeTrue();
+
+    $this->batches = ['B-900' => [settledTransaction()]];
+    $this->actingAs($admin)->post('/admin/payments/reconcile')->assertRedirect();
+
+    expect(app(ReconciliationHealth::class)->status()['stale'])->toBeFalse();
+
+    $this->actingAs($admin)->get('/admin/payments')
+        ->assertInertia(fn ($page) => $page->where('reconciliation.stale', false));
 });
 
 it('keeps a tenant out of the reconciliation action', function () {

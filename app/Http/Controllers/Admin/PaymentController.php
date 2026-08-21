@@ -8,6 +8,7 @@ use App\Domain\Payments\ReconciliationService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\RecordPaymentRequest;
 use App\Http\Requests\Admin\RecordRemittanceRequest;
+use App\Jobs\ReconcilePayments;
 use App\Models\HousingAuthority;
 use App\Models\Lease;
 use App\Models\Payment;
@@ -17,6 +18,7 @@ use App\Support\ReconciliationHealth;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -129,9 +131,22 @@ class PaymentController extends Controller
      * An admin chasing a payment that should have cleared needs the answer the
      * job would have given, not a different one.
      */
-    public function reconcile(ReconciliationService $reconciliation): RedirectResponse
+    public function reconcile(): RedirectResponse
     {
-        $result = $reconciliation->run();
+        // Through the job, not straight to the service. Both run the same
+        // reconciliation, but only the job writes the `job_runs` row that
+        // ReconciliationHealth reads — and without it the staleness banner
+        // stays up however many times somebody presses this button, which is
+        // precisely what the banner tells them to do.
+        //
+        // Called through the container rather than dispatch_sync(), because
+        // that runs a *copy*: the counts below would come back as zeros off an
+        // instance that never ran.
+        $job = new ReconcilePayments;
+
+        app()->call([$job, 'handle']);
+
+        $result = $job->lastResult ?? ['settled' => 0, 'returned' => 0, 'unmatched' => 0, 'errors' => []];
 
         $message = sprintf(
             'Reconciliation finished — %d settled, %d returned, %d needing review.',
@@ -214,7 +229,7 @@ class PaymentController extends Controller
         return ['idempotencyKey' => (string) Str::uuid()];
     }
 
-    /** @return \Illuminate\Support\Collection<int, array<string, mixed>> */
+    /** @return Collection<int, array<string, mixed>> */
     private function activeLeases()
     {
         return Lease::query()

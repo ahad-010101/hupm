@@ -28,10 +28,23 @@ class ReconcilePayments implements ShouldQueue
     /** TDD §9.1: settlement queries retry. Payment submissions never do. */
     public int $tries = 3;
 
+    /**
+     * The full outcome of the last run, for a caller that wants to report it.
+     *
+     * The nightly run needs only a count. The *manual* run needs to tell the
+     * admin what it found — and it has to go through this job rather than
+     * calling the service, because a run that records nothing in `job_runs`
+     * leaves the staleness banner up. An alarm whose own suggested remedy
+     * cannot silence it teaches people to ignore the alarm.
+     *
+     * @var array{settled:int, returned:int, noc:int, unmatched:int, errors:list<string>}|null
+     */
+    public ?array $lastResult = null;
+
     public function handle(ReconciliationService $reconciliation, AuditLogger $audit): int
     {
         return $this->trackJobRun(function () use ($reconciliation, $audit) {
-            $result = $reconciliation->run();
+            $result = $this->lastResult = $reconciliation->run();
 
             if ($result['errors'] !== []) {
                 // Recorded rather than thrown: the run did useful work on every
