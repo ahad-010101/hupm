@@ -21,6 +21,41 @@ import FormField from '@/Components/FormField';
 
 const STEPS = ['Emergency', 'What is wrong', 'Access'];
 
+/**
+ * Which step owns which field.
+ *
+ * Submitting happens on the last step, but a rejected field may live on an
+ * earlier one — and its message renders inside a panel the tenant can no longer
+ * see. Without this the form simply refuses to submit and says nothing at all,
+ * which reads as a broken button. Every error message has to say what to do
+ * next (UI §8), and the first part of that is being on screen.
+ *
+ * `photos` belongs to the last step; anything unlisted falls there too, so a
+ * new field cannot go quietly missing.
+ */
+export const STEP_FIELDS = [
+    ['emergency_acknowledged', 'is_emergency'],
+    ['category', 'description', 'date_began'],
+    ['permission_to_enter', 'preferred_contact', 'contact_phone', 'pets_present', 'best_access_time', 'photos'],
+];
+
+/** The earliest step carrying an error, or null when none of them do. */
+export function firstStepWithError(errors) {
+    const keys = Object.keys(errors ?? {});
+
+    if (keys.length === 0) {
+        return null;
+    }
+
+    const index = STEP_FIELDS.findIndex((fields) =>
+        keys.some((key) => fields.includes(key.split('.')[0])),
+    );
+
+    // An error on a field no step claims still has to be seen, so fall back to
+    // the last step rather than swallowing it.
+    return index === -1 ? STEP_FIELDS.length - 1 : index;
+}
+
 export default function New({
     categories = {},
     hasLease,
@@ -34,6 +69,7 @@ export default function New({
     const [step, setStep] = useState(0);
     const [files, setFiles] = useState([]);
     const [rejected, setRejected] = useState([]);
+    const [submitFailed, setSubmitFailed] = useState(false);
 
     const { data, setData, post, processing, errors, transform } = useForm({
         emergency_acknowledged: false,
@@ -62,7 +98,22 @@ export default function New({
         e.preventDefault();
 
         transform((form) => ({ ...form, photos: files }));
-        post('/portal/maintenance', { forceFormData: true });
+
+        post('/portal/maintenance', {
+            forceFormData: true,
+            onError: (failures) => {
+                // Go to where the problem is. Leaving the tenant on the last
+                // panel while the message sits on the second one is the same as
+                // showing nothing.
+                const target = firstStepWithError(failures);
+
+                if (target !== null) {
+                    setStep(target);
+                    setSubmitFailed(true);
+                }
+            },
+            onSuccess: () => setSubmitFailed(false),
+        });
     };
 
     if (!hasLease) {
@@ -80,20 +131,40 @@ export default function New({
         <PortalLayout header="Report a repair">
             <Head title="Report a repair" />
 
+            {submitFailed && (
+                // Said once, at the top, as well as beside the field. A tenant
+                // who pressed Send and was moved back two panels needs to know
+                // why they moved (UI §7).
+                <Alert tone="warning" className="mb-4" title="We need one more thing before we can send this">
+                    Nothing has been lost — everything you typed is still here. Please check the
+                    highlighted answer below, then send it again.
+                </Alert>
+            )}
+
             <ol className="mb-4 flex gap-2 text-sm" aria-label="Progress">
-                {STEPS.map((label, i) => (
-                    <li
-                        key={label}
-                        aria-current={i === step ? 'step' : undefined}
-                        className={`flex-1 rounded-md border px-2 py-1 text-center ${
-                            i === step
-                                ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700'
-                                : 'border-gray-300 bg-white text-gray-600'
-                        }`}
-                    >
-                        {label}
-                    </li>
-                ))}
+                {STEPS.map((label, i) => {
+                    const needsAttention = (STEP_FIELDS[i] ?? []).some(
+                        (field) => Object.keys(errors).some((key) => key.split('.')[0] === field),
+                    );
+
+                    return (
+                        <li
+                            key={label}
+                            aria-current={i === step ? 'step' : undefined}
+                            className={`flex-1 rounded-md border px-2 py-1 text-center ${
+                                needsAttention
+                                    ? 'border-overdue-fg bg-overdue-bg font-semibold text-overdue-fg'
+                                    : i === step
+                                      ? 'border-brand-600 bg-brand-50 font-semibold text-brand-700'
+                                      : 'border-gray-300 bg-white text-gray-600'
+                            }`}
+                        >
+                            {label}
+                            {/* Not colour alone (UI §9). */}
+                            {needsAttention && <span className="ml-1" aria-label="needs attention">!</span>}
+                        </li>
+                    );
+                })}
             </ol>
 
             <form onSubmit={submit} noValidate className="rounded-lg border border-gray-200 bg-white p-5">
