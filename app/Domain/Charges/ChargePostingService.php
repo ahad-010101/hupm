@@ -4,14 +4,15 @@ namespace App\Domain\Charges;
 
 use App\Domain\Ledger\LedgerService;
 use App\Domain\Notifications\NotificationService;
-use App\Domain\Payments\AllocationService;
 use App\Domain\Notifications\NotificationTemplate;
+use App\Domain\Payments\AllocationService;
 use App\Models\Lease;
 use App\Models\LedgerEntry;
 use App\Support\BusinessCalendar;
 use App\Support\Money;
 use App\Support\Settings;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -46,9 +47,15 @@ class ChargePostingService
      * period is worse than a missed one, because the next run would see the
      * period as already handled and never complete it.
      *
+     * `$notify` exists for **backfill**: replaying months that have already
+     * happened must not email a resident that last March's rent is due. The
+     * nightly job leaves it alone; the demo seeder and WP-08's opening-balance
+     * import pass false. Defaulting to true means a caller has to ask for
+     * silence rather than accidentally get it.
+     *
      * @return int the number of entries posted
      */
-    public function postFor(Lease $lease, ?CarbonImmutable $asOf = null): int
+    public function postFor(Lease $lease, ?CarbonImmutable $asOf = null, bool $notify = true): int
     {
         $asOf ??= $this->calendar->today();
 
@@ -57,11 +64,11 @@ class ChargePostingService
             return 0;
         }
 
-        return DB::transaction(function () use ($lease, $asOf) {
+        return DB::transaction(function () use ($lease, $asOf, $notify) {
             $posted = 0;
 
             foreach ($this->periods->duePeriodsFor($lease, $asOf) as $period) {
-                $posted += $this->postPeriod($lease, $period);
+                $posted += $this->postPeriod($lease, $period, $notify);
             }
 
             if ($posted > 0) {
@@ -80,7 +87,7 @@ class ChargePostingService
     }
 
     /** @param object{period:string, postedOn:CarbonImmutable, prorated:bool, daysCharged:int, daysInPeriod:int} $period */
-    private function postPeriod(Lease $lease, object $period): int
+    private function postPeriod(Lease $lease, object $period, bool $notify = true): int
     {
         $existing = $this->existingKeysFor($lease, $period->period);
         $posted = 0;
@@ -99,7 +106,9 @@ class ChargePostingService
                 );
                 $posted++;
 
-                $this->queueRentDueEmail($lease, $amount, $period);
+                if ($notify) {
+                    $this->queueRentDueEmail($lease, $amount, $period);
+                }
             }
         }
 
@@ -190,7 +199,7 @@ class ChargePostingService
             ->all();
     }
 
-    /** @return \Illuminate\Support\Collection<int, object> */
+    /** @return Collection<int, object> */
     private function activeSchedules(Lease $lease)
     {
         return DB::table('lease_charge_schedules')
