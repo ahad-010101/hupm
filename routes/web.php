@@ -13,6 +13,7 @@ use App\Http\Controllers\Admin\MaintenanceController;
 use App\Http\Controllers\Admin\NoticeController as AdminNoticeController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
+use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\SearchController;
 use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
 use App\Http\Controllers\Admin\TenantController;
@@ -132,6 +133,11 @@ Route::middleware('auth')->group(function () {
         // Global search across tenant, unit and ticket number. A page, not an
         // endpoint: results get a URL and a back button.
         Route::get('search', SearchController::class)->name('search');
+
+        // Reports (API-ADM-32…35). The export route is declared first so
+        // `reports/{report}` cannot swallow `reports/rent-roll/export`.
+        Route::get('reports/{report}/export', [ReportController::class, 'export'])->name('reports.export');
+        Route::get('reports/{report?}', [ReportController::class, 'index'])->name('reports.index');
 
         // Cascading address dropdowns for the property form (D-19).
         Route::get('address/states', [AddressLookupController::class, 'states'])->name('address.states');
