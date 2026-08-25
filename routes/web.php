@@ -15,6 +15,7 @@ use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PropertyController;
 use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\SearchController;
+use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
@@ -138,6 +139,14 @@ Route::middleware('auth')->group(function () {
         // `reports/{report}` cannot swallow `reports/rent-roll/export`.
         Route::get('reports/{report}/export', [ReportController::class, 'export'])->name('reports.export');
         Route::get('reports/{report?}', [ReportController::class, 'index'])->name('reports.index');
+
+        // Settings (API-ADM-40). Changing a value and confirming a gated
+        // decision are separate routes because they are separate acts —
+        // confirming the shipped default is an answer, and go-live blocks on
+        // the confirmations rather than on the values.
+        Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
+        Route::patch('settings', [SettingController::class, 'update'])->name('settings.update');
+        Route::post('settings/confirm', [SettingController::class, 'confirm'])->name('settings.confirm');
 
         // Cascading address dropdowns for the property form (D-19).
         Route::get('address/states', [AddressLookupController::class, 'states'])->name('address.states');
