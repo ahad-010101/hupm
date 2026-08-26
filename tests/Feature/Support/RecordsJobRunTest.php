@@ -23,7 +23,7 @@ class FakeJob
 {
     use RecordsJobRun;
 
-    public function __construct(private readonly \Closure $work) {}
+    public function __construct(private readonly Closure $work) {}
 
     public function run(): int
     {
@@ -85,4 +85,36 @@ it('stores only the exception message, never a trace', function () {
 
     expect(DB::table('job_runs')->first()->error)->toBe('boom')
         ->and(DB::table('job_runs')->first()->error)->not->toContain('#0 ');
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Coverage  [WP-31 DoD]
+ |--------------------------------------------------------------------------
+ */
+
+it('WP-31 wraps every scheduled job in a run record', function () {
+    // Read from the schedule rather than from a hand-kept list. A job added to
+    // routes/console.php without the trait is invisible in exactly the way this
+    // whole mechanism exists to prevent: it stops running and `job_runs` looks
+    // no different, because it was never in there.
+    //
+    // That the trait records both outcomes is proven by the two tests above;
+    // this is the other half of the WP-31 item — that nothing escapes it.
+    $console = file_get_contents(base_path('routes/console.php'));
+
+    preg_match_all('/Schedule::job\(new (\w+)/', $console, $matches);
+
+    $scheduled = array_unique($matches[1]);
+
+    expect($scheduled)->not->toBeEmpty('No scheduled jobs found — the pattern has drifted.');
+
+    foreach ($scheduled as $short) {
+        $class = 'App\\Jobs\\'.$short;
+
+        expect(class_exists($class))->toBeTrue("{$class} is scheduled but does not exist.");
+
+        expect(in_array(RecordsJobRun::class, class_uses_recursive($class), true))
+            ->toBeTrue("{$short} is scheduled but does not record a job run.");
+    }
 });

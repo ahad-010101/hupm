@@ -25,7 +25,26 @@ use Illuminate\Support\Facades\DB;
  */
 class ReconciliationHealth
 {
-    private const STALE_AFTER_HOURS = 36;
+    /**
+     * The shipped default, in hours.
+     *
+     * Thirty-six rather than twenty-four: a daily job that runs at 06:00 is
+     * not late at 06:05 the next morning, and a banner that cries wolf every
+     * morning is a banner nobody reads.
+     *
+     * Overridable through `reconciliation.stale_hours`, which existed as a
+     * settings row before anything read it. The banner and the WP-31 email
+     * alert both resolve the threshold here, so they cannot disagree about
+     * when reconciliation has gone stale.
+     */
+    private const DEFAULT_STALE_AFTER_HOURS = 36;
+
+    public function __construct(private readonly Settings $settings) {}
+
+    public function staleAfterHours(): int
+    {
+        return max(1, $this->settings->int('reconciliation.stale_hours', self::DEFAULT_STALE_AFTER_HOURS));
+    }
 
     /** @return array{last_success: ?string, hours_ago: ?int, stale: bool, never_run: bool} */
     public function status(): array
@@ -48,7 +67,7 @@ class ReconciliationHealth
         return [
             'last_success' => $at->toIso8601String(),
             'hours_ago' => $hours,
-            'stale' => $hours > self::STALE_AFTER_HOURS,
+            'stale' => $hours > $this->staleAfterHours(),
             'never_run' => false,
         ];
     }

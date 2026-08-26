@@ -6,6 +6,7 @@ use App\Jobs\PollWeatherAlerts;
 use App\Jobs\PostLateFees;
 use App\Jobs\PostScheduledCharges;
 use App\Jobs\ReconcilePayments;
+use App\Jobs\SendSystemAlerts;
 use App\Support\SystemHealth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
@@ -103,6 +104,19 @@ Schedule::job(new PollWeatherAlerts)
     ->hourly()
     ->withoutOverlapping()
     ->name('poll-weather-alerts');
+
+/*
+ | Operational alerts (TDD §10). Hourly, because the fastest-moving of the five
+ | conditions — six failed jobs in an hour — is measured over an hour.
+ |
+ | Deliberately last in the file among the recurring jobs: it reports on the
+ | others, and reporting on a run that has not happened yet is how you get an
+ | alert about a job that succeeded four minutes later.
+ */
+Schedule::job(new SendSystemAlerts)
+    ->hourly()
+    ->withoutOverlapping()
+    ->name('send-system-alerts');
 
 /*
  | Scheduler heartbeat (API-PUB-07). Proof the one cron entry is still firing.

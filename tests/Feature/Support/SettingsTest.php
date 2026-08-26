@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Support\Money;
 use App\Support\Settings;
+use Database\Seeders\SettingsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -44,7 +45,7 @@ it('falls back to the given default for an unknown key', function () {
 });
 
 it('lists every gated decision still awaiting a client answer', function () {
-    $this->seed(Database\Seeders\SettingsSeeder::class);
+    $this->seed(SettingsSeeder::class);
     $this->settings->flush();
 
     $unconfirmed = $this->settings->unconfirmedGatedKeys();
@@ -58,7 +59,7 @@ it('lists every gated decision still awaiting a client answer', function () {
 });
 
 it('records who confirmed a gated decision and when', function () {
-    $this->seed(Database\Seeders\SettingsSeeder::class);
+    $this->seed(SettingsSeeder::class);
     $user = User::factory()->create(['role' => 'admin']);
 
     $this->settings->confirm('payment.allocation_order', $user->id);

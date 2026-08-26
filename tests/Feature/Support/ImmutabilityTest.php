@@ -5,6 +5,7 @@ use App\Models\AuditLog;
 use App\Models\Document;
 use App\Models\LedgerEntry;
 use App\Models\SignatureEvent;
+use App\Support\AuditLogger;
 use App\Support\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -93,7 +94,7 @@ it('AC-LED-01 refuses to delete a ledger entry', function () {
 });
 
 it('AC-AUD-02 refuses to delete or alter an audit row', function () {
-    app(App\Support\AuditLogger::class)->record('test.action');
+    app(AuditLogger::class)->record('test.action');
     $row = AuditLog::firstOrFail();
 
     expect(fn () => $row->delete())->toThrow(ImmutableRecordException::class);
