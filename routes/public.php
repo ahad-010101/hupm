@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Public\HealthController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -46,3 +47,14 @@ Route::view('/privacy', 'public.placeholder')->name('public.privacy')
 
 Route::view('/terms', 'public.placeholder')->name('public.terms')
     ->defaults('heading', 'Terms of Use');
+
+/*
+ | Health (API-PUB-07, D-06). Not a page — JSON, for an uptime monitor.
+ |
+ | Throttled because it is unauthenticated and touches the database on every
+ | call; sixty a minute is far more than any monitor needs and far less than a
+ | cheap way to make the database do work.
+ */
+Route::get('/health', HealthController::class)
+    ->middleware('throttle:60,1')
+    ->name('public.health');

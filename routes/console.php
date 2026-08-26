@@ -6,6 +6,8 @@ use App\Jobs\PollWeatherAlerts;
 use App\Jobs\PostLateFees;
 use App\Jobs\PostScheduledCharges;
 use App\Jobs\ReconcilePayments;
+use App\Support\SystemHealth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -101,6 +103,23 @@ Schedule::job(new PollWeatherAlerts)
     ->hourly()
     ->withoutOverlapping()
     ->name('poll-weather-alerts');
+
+/*
+ | Scheduler heartbeat (API-PUB-07). Proof the one cron entry is still firing.
+ |
+ | Without this /health has nothing to report for "last scheduler run", and the
+ | obvious substitute — the newest `job_runs` row — is wrong: the earliest daily
+ | job is at 05:00, so at 03:00 a perfectly healthy system would look twenty-two
+ | hours stale and the check would be ignored within a week.
+ |
+ | This is what catches R-5, the single most common failure on this host: a cron
+ | entry using bare `php` instead of the absolute CLI path. Nothing throws, no
+ | page breaks — charges simply stop being posted. One row a minute in the cache
+ | table is a small price for noticing that on the first morning.
+ */
+Schedule::call(fn () => Cache::forever(SystemHealth::HEARTBEAT_KEY, now()->toIso8601String()))
+    ->everyMinute()
+    ->name('scheduler-heartbeat');
 
 // Drain the queue once a minute and exit. --max-time=50 keeps it comfortably
 // inside the next minute's tick so two workers never overlap; --stop-when-empty

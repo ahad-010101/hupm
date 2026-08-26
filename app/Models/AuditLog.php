@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Concerns\Immutable;
+use App\Support\AuditLogger;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * An audit row. Append-only, no exceptions (AC-AUD-02).
@@ -25,5 +27,18 @@ class AuditLog extends Model
             'changes' => 'array',
             'created_at' => 'datetime',
         ];
+    }
+
+    /**
+     * The person who acted, or null for the system.
+     *
+     * Read-side only — {@see AuditLogger} writes `user_id` through
+     * the query builder and never touches this. The foreign key is
+     * `nullOnDelete`, so a deleted admin leaves their rows behind as
+     * system-attributed rather than taking the trail with them.
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 }

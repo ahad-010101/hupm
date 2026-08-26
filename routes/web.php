@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\ArrangementController;
+use App\Http\Controllers\Admin\AuditController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DelinquencyController;
 use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
@@ -139,6 +140,12 @@ Route::middleware('auth')->group(function () {
         // `reports/{report}` cannot swallow `reports/rent-roll/export`.
         Route::get('reports/{report}/export', [ReportController::class, 'export'])->name('reports.export');
         Route::get('reports/{report?}', [ReportController::class, 'index'])->name('reports.index');
+
+        // Audit trail (API-ADM-41). One route, GET only. There is deliberately
+        // no PUT, PATCH or DELETE anywhere for audit rows: the model refuses
+        // both (AC-AUD-02), and a route that does not exist cannot be reached
+        // by a bug in a policy either.
+        Route::get('audit', [AuditController::class, 'index'])->name('audit.index');
 
         // Settings (API-ADM-40). Changing a value and confirming a gated
         // decision are separate routes because they are separate acts —
