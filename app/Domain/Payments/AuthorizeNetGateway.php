@@ -175,6 +175,51 @@ class AuthorizeNetGateway
     }
 
     /**
+     * Find the transaction a payment just created, by asking.
+     *
+     * **Accept Hosted's redirect mode returns no transaction data.** Its
+     * documentation is explicit: the continue button "sends an HTTP GET request
+     * to that URL", and the response fields — `transId` among them — come back
+     * only through the iframe communicator, which a redirect integration does
+     * not have. So a resident who has genuinely just paid returns to us with
+     * nothing in hand, and we cannot tell them apart from one whose payment was
+     * declined or who never submitted at all.
+     *
+     * Guessing either way is wrong in a way that costs money. Told it worked
+     * when it did not, a resident does not pay; told it failed when it worked,
+     * they pay twice. So we ask instead: the invoice number we sent is our
+     * payment id, and a transaction created seconds ago is at the top of the
+     * unsettled list.
+     *
+     * Reconciliation remains the authority (R-6). This only shortens the gap
+     * between a resident paying and the screen being able to say so.
+     *
+     * @return array<string, mixed>|null the transaction, or null if the gateway
+     *                                   has never heard of this payment
+     */
+    public function findUnsettledByInvoice(string $invoiceNumber): ?array
+    {
+        $response = $this->send([
+            'getUnsettledTransactionListRequest' => [
+                'merchantAuthentication' => $this->authentication(),
+                'sorting' => ['orderBy' => 'submitTimeUTC', 'orderDescending' => true],
+                // Newest first, so the payment made moments ago is on page one.
+                // Unsettled means "since the last batch closed", which on this
+                // portfolio is a day of activity, not a backlog.
+                'paging' => ['limit' => 100, 'offset' => 1],
+            ],
+        ], retry: true);
+
+        foreach ($response['transactions'] ?? [] as $transaction) {
+            if ((string) ($transaction['invoiceNumber'] ?? '') === $invoiceNumber) {
+                return $transaction;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * What the gateway knows about one transaction.
      *
      * Used by the return handler and, authoritatively, by WP-14's daily

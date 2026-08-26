@@ -299,7 +299,10 @@ it('AC-PAY-15 keeps admin-recorded payment working throughout', function () {
         'lease_id' => $this->lease->id,
         'payer' => 'tenant',
         'amount' => '500.00',
-        'received_on' => now()->toDateString(),
+        // businessToday(), not now(): between midnight and 4am UTC the
+        // server has rolled over but New York has not, so a UTC date is a
+        // *future* business date and the validator rightly refuses it (D-07).
+        'received_on' => businessToday(),
         'method' => 'cheque',
         'reference' => '10412',
         'idempotency_key' => (string) Str::uuid(),

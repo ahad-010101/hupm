@@ -77,6 +77,9 @@ beforeEach(function () {
         'Rent — February 2026', 'pay:ha', CarbonImmutable::parse('2026-02-01'), '2026-02',
     );
 
+    $this->unsettled = [];
+    $this->gatewayDown = false;
+
     $this->actingAs($this->user);
 });
 
@@ -261,21 +264,123 @@ it('does not tell a tenant to try again when the gateway calls it a duplicate', 
         ->and($message)->not->toContain('Nothing has been charged');
 });
 
-it('does not call a payment submitted when it came back without a transaction id', function () {
-    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'hosted-token-abc']))]);
+/*
+ |--------------------------------------------------------------------------
+ | Coming back from the hosted page
+ |--------------------------------------------------------------------------
+ |
+ | Accept Hosted's redirect mode returns **no transaction data** — its own
+ | documentation says the continue button "sends an HTTP GET request to that
+ | URL", and `transId` comes back only through the iframe communicator, which a
+ | redirect integration does not have.
+ |
+ | So the resident always returns empty-handed, and guessing is wrong in a way
+ | that costs money in both directions: told it worked when it did not, they do
+ | not pay; told it failed when it worked, they pay twice. The confirm page asks
+ | the gateway instead.
+ |
+ */
+
+/**
+ * One request-aware fake, registered once, reading a mutable property.
+ *
+ * `Http::fake()` **merges** rather than replaces — calling it a second time
+ * leaves the first stub in front, so a later stub never runs and the unsettled
+ * lookup silently receives the hosted-token body instead. The reconciliation
+ * suite documents the same trap; a closure over a property the test can change
+ * mid-run is the way round it.
+ */
+function fakeHostedFlow(): void
+{
+    Http::fake(function ($request) {
+        if (test()->gatewayDown) {
+            return Http::response('', 503);
+        }
+
+        $name = (string) array_key_first($request->data());
+
+        if ($name === 'getUnsettledTransactionListRequest') {
+            return Http::response(anetBody(['transactions' => test()->unsettled]));
+        }
+
+        return Http::response(anetBody(['token' => 'hosted-token-abc']));
+    });
+}
+
+/** One unsettled transaction, as the gateway returns it. */
+function unsettled(int $paymentId, string $status = 'capturedPendingSettlement', string $transId = '60000456'): array
+{
+    return [[
+        'transId' => $transId,
+        'transactionStatus' => $status,
+        'invoiceNumber' => (string) $paymentId,
+        'settleAmount' => '500.00',
+    ]];
+}
+
+it('confirms a real payment by asking the gateway, since the redirect hands back nothing', function () {
+    fakeHostedFlow();
     $this->postJson('/portal/pay', payPayload())->assertOk();
 
-    // Refused on Authorize.Net's own page — a duplicate, a rejected account —
-    // so the tenant comes back with nothing to show for it.
+    $this->unsettled = unsettled(Payment::sole()->id);
+
     $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page
         ->component('Portal/PayResult')
-        ->where('state', 'unconfirmed'));
-
-    // And with one, it is a submission and may be called one.
-    Payment::sole()->forceFill(['gateway_transaction_id' => '60000456'])->save();
-
-    $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page
         ->where('state', 'submitted'));
+
+    // The id is filed, so reconciliation can match on it rather than falling
+    // back to the invoice number.
+    expect(Payment::sole()->gateway_transaction_id)->toBe('60000456');
+});
+
+it('says the bank refused it when the bank refused it', function () {
+    fakeHostedFlow();
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    $this->unsettled = unsettled(Payment::sole()->id, 'declined');
+
+    // A definite answer, and a different one from "we do not know". Telling
+    // this resident their payment is on its way is how they find out otherwise
+    // a fortnight later, in arrears.
+    $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page->where('state', 'declined'));
+});
+
+it('admits it does not know when the gateway has never heard of the payment', function () {
+    fakeHostedFlow();
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    // Nothing matching: the form was abandoned, or refused outright.
+    $this->unsettled = [];
+
+    $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page->where('state', 'unconfirmed'));
+
+    expect(Payment::sole()->gateway_transaction_id)->toBeNull();
+});
+
+it('admits it does not know when it cannot reach the gateway at all', function () {
+    fakeHostedFlow();
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    $this->gatewayDown = true;
+
+    // Honest rather than optimistic. Reconciliation settles it within a day
+    // regardless (R-6); what this must never do is guess.
+    $this->get('/portal/pay/confirm')->assertInertia(fn ($page) => $page->where('state', 'unconfirmed'));
+});
+
+it('takes the transaction id from the query string when an iframe integration supplies one', function () {
+    fakeHostedFlow();
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    $this->get('/portal/pay/confirm?transId=60000999')
+        ->assertInertia(fn ($page) => $page->where('state', 'submitted'));
+
+    expect(Payment::sole()->gateway_transaction_id)->toBe('60000999');
+
+    // An id in hand means there is nothing to look up. (Other calls do go out
+    // on this path — the saved-method sync — so it is this one request that
+    // has to be absent, not all of them.)
+    Http::assertNotSent(fn ($request) => array_key_first($request->data()) === 'getUnsettledTransactionListRequest');
 });
 
 it('treats a gateway error response as unreachable rather than as a rejection', function () {

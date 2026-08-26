@@ -135,23 +135,20 @@ class PaymentController extends Controller
             $this->intents->abandon($payment, null, 'cancelled at the gateway');
         }
 
+        $outcome = null;
+
         if ($payment && ! $cancelled) {
-            $this->intents->recordReturn($payment, $this->transactionIdFrom($request));
+            $outcome = $this->resolveOutcome($payment, $request);
             $this->syncSavedMethods($tenant);
         }
 
         return Inertia::render('Portal/PayResult', [
-            // "Submitted" is a claim, and it needs the transaction id to back
-            // it. Coming back without one means the gateway refused the form —
-            // a duplicate, a rejected account — or never handed the id over.
-            // Either way we cannot honestly say the payment is on its way, and
-            // a green "Payment submitted" for a declined transaction is the
-            // worst thing on this screen.
-            'state' => $cancelled
-                ? 'cancelled'
-                : ($payment
-                    ? ($payment->gateway_transaction_id ? 'submitted' : 'unconfirmed')
-                    : 'unknown'),
+            // Three honest answers rather than two guesses. Accept Hosted's
+            // redirect mode hands back no transaction data at all, so before
+            // asking the gateway there was no way to tell a resident who had
+            // just paid from one whose payment was refused — and both wrong
+            // answers cost money, in opposite directions.
+            'state' => $cancelled ? 'cancelled' : ($outcome ?? 'unknown'),
             'amount' => $payment && ! $cancelled ? (string) $payment->amount : null,
             'reference' => $payment && ! $cancelled ? $payment->id : null,
             'balance' => $tenant ? (string) $this->balances->tenantBalance($tenant->id) : null,
@@ -246,6 +243,57 @@ class PaymentController extends Controller
             ->where('status', Payment::STATUS_PENDING)
             ->orderByDesc('id')
             ->first();
+    }
+
+    /**
+     * Did this payment actually reach the gateway?
+     *
+     * The id arrives in the query string only for an iframe integration. In
+     * redirect mode it never does, so the fallback — asking the gateway whether
+     * a transaction exists for this payment — is the normal path rather than
+     * the exception.
+     *
+     * A gateway we cannot reach leaves the payment exactly as it was and
+     * returns `unconfirmed`. That is honest, and reconciliation will settle it
+     * within a day regardless (R-6); what it must never do is guess.
+     */
+    private function resolveOutcome(Payment $payment, Request $request): string
+    {
+        $transactionId = $this->transactionIdFrom($request);
+
+        if ($transactionId !== null) {
+            $this->intents->recordReturn($payment, $transactionId);
+
+            return 'submitted';
+        }
+
+        try {
+            $transaction = $this->gateway->findUnsettledByInvoice((string) $payment->id);
+        } catch (GatewayUnavailableException $e) {
+            Log::warning('Could not confirm a payment on return from the gateway.', [
+                'payment_id' => $payment->id,
+                'detail' => $e->getMessage(),
+                ...$e->context,
+            ]);
+
+            return 'unconfirmed';
+        }
+
+        if ($transaction === null) {
+            // The gateway has never heard of it: the form was abandoned, or the
+            // submission was refused outright. Either way no money moved, and
+            // CleanupAbandonedPayments will void the row.
+            return 'unconfirmed';
+        }
+
+        $this->intents->recordReturn($payment, (string) ($transaction['transId'] ?? ''));
+
+        // A declined transaction is a real answer and a different one. Telling
+        // this resident their payment is on its way is how they discover
+        // otherwise a fortnight later, in arrears.
+        return in_array($transaction['transactionStatus'] ?? '', ['declined', 'voided', 'expired'], true)
+            ? 'declined'
+            : 'submitted';
     }
 
     private function transactionIdFrom(Request $request): ?string
