@@ -2,22 +2,36 @@ import { useState } from 'react';
 import { Head, Link, useForm } from '@inertiajs/react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import FormField from '@/Components/FormField';
+import Alert from '@/Components/Alert';
 
 /**
- * Property create/edit.  [FR-REG-01, AC-REG-02, D-19]
+ * Property create/edit.  [FR-REG-01, AC-REG-02, D-19, FR-NTF-03]
  *
- * State → city, the city disabled until a state is chosen, then the address
- * lines and postal code. Cities are fetched as the selection narrows: the full
- * list is 150,000 rows, so shipping it to the browser is not an option.
+ * Country → state → city → county, each level disabled until the one above it
+ * is chosen, then the address lines and postal code. Levels are fetched as the
+ * selection narrows: the full city list is 150,000 rows, so shipping it to the
+ * browser is not an option.
  *
- * No country is asked for. Every property in this portfolio is in the United
- * States; `country_code` is sent as US and validated server-side all the same.
+ * County is a list, not a text box, wherever we hold one. It is not a
+ * formality — the National Weather Service names an alert's area as
+ * "Fulton; DeKalb; Cobb" and a property is matched to an alert on that string,
+ * so "Dekalb" typed in a hurry saves happily and then never matches an alert
+ * again. Where we hold no list for a state the field falls back to free text,
+ * because a county we cannot check is still better than no county at all.
  */
-export default function Form({ property, states: initialStates, cities: initialCities, selectedStateId }) {
+export default function Form({
+    property,
+    countries,
+    states: initialStates,
+    cities: initialCities,
+    counties: initialCounties,
+    selectedStateId,
+}) {
     const editing = Boolean(property);
 
     const [states, setStates] = useState(initialStates ?? []);
     const [cities, setCities] = useState(initialCities ?? []);
+    const [counties, setCounties] = useState(initialCounties ?? []);
     const [stateId, setStateId] = useState(selectedStateId ?? '');
     const [loading, setLoading] = useState(null); // 'states' | 'cities' | null
 
@@ -42,18 +56,46 @@ export default function Form({ property, states: initialStates, cities: initialC
         return response.ok ? response.json() : null;
     };
 
+    const onCountryChange = async (code) => {
+        // Clearing the levels below is the point of a cascade: leaving
+        // "Ontario" selected under the United States is how bad data is stored.
+        setData((current) => ({ ...current, country_code: code, state: '', city: '', county: '' }));
+        setStates([]);
+        setCities([]);
+        setCounties([]);
+        setStateId('');
+
+        if (!code) return;
+
+        setLoading('states');
+        const payload = await load(`/admin/address/states?country=${code}`);
+        setStates(payload?.states ?? []);
+        setLoading(null);
+    };
+
     const onStateChange = async (id) => {
         const chosen = states.find((s) => String(s.id) === String(id));
+        const name = chosen?.name ?? '';
 
         setStateId(id);
-        setData((current) => ({ ...current, state: chosen?.name ?? '', city: '' }));
+        setData((current) => ({ ...current, state: name, city: '', county: '' }));
         setCities([]);
+        setCounties([]);
 
         if (!id) return;
 
         setLoading('cities');
-        const payload = await load(`/admin/address/cities?state=${id}`);
-        setCities(payload?.cities ?? []);
+
+        // Both levels at once. They depend on the same choice, and fetching
+        // them in sequence would leave the county box briefly claiming the
+        // state has no counties.
+        const [cityPayload, countyPayload] = await Promise.all([
+            load(`/admin/address/cities?state=${id}`),
+            load(`/admin/address/counties?state=${encodeURIComponent(name)}`),
+        ]);
+
+        setCities(cityPayload?.cities ?? []);
+        setCounties(countyPayload?.counties ?? []);
         setLoading(null);
     };
 
@@ -64,6 +106,9 @@ export default function Form({ property, states: initialStates, cities: initialC
 
     const selectClasses =
         'block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600 disabled:bg-gray-100 disabled:text-gray-500';
+
+    // A list for this state, or nothing to choose from.
+    const hasCountyList = counties.length > 0;
 
     return (
         <AdminLayout header={editing ? `Edit ${property.name}` : 'Add property'}>
@@ -82,28 +127,33 @@ export default function Form({ property, states: initialStates, cities: initialC
                 <fieldset className="mb-4">
                     <legend className="mb-2 text-lg font-semibold text-gray-900">Address</legend>
 
-                    {/* No country field. Every property in this portfolio is in
-                        the United States, and asking a question with one
-                        possible answer is friction on the first field of the
-                        form. `country_code` still travels with the payload and
-                        is still validated server-side — it is simply not asked
-                        for. Errors on it would be a programming fault rather
-                        than something the office typed, so they surface with
-                        the state. */}
-                    <div className="grid gap-x-4 sm:grid-cols-2">
-                        <FormField
-                            label="State"
-                            error={errors.state ?? errors.country_code}
-                            required
-                        >
+                    <div className="grid gap-x-4 sm:grid-cols-3">
+                        <FormField label="Country" error={errors.country_code} required>
+                            <select
+                                value={data.country_code}
+                                onChange={(e) => onCountryChange(e.target.value)}
+                                className={selectClasses}
+                            >
+                                <option value="">Choose a country…</option>
+                                {countries.map((c) => (
+                                    <option key={c.iso2} value={c.iso2}>{c.name}</option>
+                                ))}
+                            </select>
+                        </FormField>
+
+                        <FormField label="State / Province" error={errors.state} required>
                             <select
                                 value={stateId}
                                 onChange={(e) => onStateChange(e.target.value)}
-                                disabled={loading === 'states'}
+                                disabled={!data.country_code || loading === 'states'}
                                 className={selectClasses}
                             >
                                 <option value="">
-                                    {loading === 'states' ? 'Loading…' : 'Choose a state…'}
+                                    {!data.country_code
+                                        ? 'Choose a country first'
+                                        : loading === 'states'
+                                          ? 'Loading…'
+                                          : 'Choose a state / province…'}
                                 </option>
                                 {states.map((s) => (
                                     <option key={s.id} value={s.id}>{s.name}</option>
@@ -131,6 +181,15 @@ export default function Form({ property, states: initialStates, cities: initialC
                             </select>
                         </FormField>
                     </div>
+
+                    {data.country_code && data.country_code !== 'US' && (
+                        // Said at the moment of the choice rather than
+                        // discovered when the alerts never arrive.
+                        <Alert tone="warning" className="mb-4" title="Weather alerts are US only">
+                            The National Weather Service covers the United States, so residents at this
+                            property will not receive automated weather alerts.
+                        </Alert>
+                    )}
 
                     <FormField
                         label="Address"
@@ -160,18 +219,46 @@ export default function Form({ property, states: initialStates, cities: initialC
                             error={errors.postal_code}
                             maxLength={16}
                             autoComplete="postal-code"
-                            hint="Five digits. This determines which weather alerts residents receive."
+                            hint={
+                                data.country_code === 'US'
+                                    ? 'Five digits. This determines which weather alerts residents receive.'
+                                    : undefined
+                            }
                             required
                         />
 
-                        <FormField
-                            label="County"
-                            value={data.county}
-                            onChange={(e) => setData('county', e.target.value)}
-                            error={errors.county}
-                            maxLength={100}
-                            hint="Optional."
-                        />
+                        {hasCountyList ? (
+                            <FormField
+                                label="County"
+                                error={errors.county}
+                                hint="Optional, but weather alerts are matched by county."
+                            >
+                                <select
+                                    value={data.county}
+                                    onChange={(e) => setData('county', e.target.value)}
+                                    className={selectClasses}
+                                >
+                                    <option value="">No county recorded</option>
+                                    {counties.map((c) => (
+                                        <option key={c} value={c}>{c}</option>
+                                    ))}
+                                </select>
+                            </FormField>
+                        ) : (
+                            <FormField
+                                label="County"
+                                value={data.county}
+                                onChange={(e) => setData('county', e.target.value)}
+                                error={errors.county}
+                                maxLength={100}
+                                disabled={!stateId}
+                                hint={
+                                    stateId
+                                        ? 'Optional. We have no list for this state, so type it as the weather service spells it.'
+                                        : 'Choose a state first.'
+                                }
+                            />
+                        )}
                     </div>
                 </fieldset>
 

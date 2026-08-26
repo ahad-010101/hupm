@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { cloneElement, isValidElement, useId } from 'react';
 
 /**
  * A labelled form control with an accessible error.  [UI §9, FS §18.3]
@@ -33,6 +33,26 @@ export default function FormField({
 
     const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ');
 
+    /*
+     * A passed-in control gets the same wiring the built-in input gets.
+     *
+     * Without this the <label for> points at an id nothing carries, so every
+     * <select> rendered through this component — country, state, city, county —
+     * is an unlabelled combobox to a screen reader, while looking perfectly
+     * labelled on screen. The docblock above promises a real <label for>; this
+     * is what keeps that true for the children form as well.
+     *
+     * An id the caller set wins, and anything that is not a single element is
+     * left alone.
+     */
+    const control = isValidElement(children)
+        ? cloneElement(children, {
+            id: children.props.id ?? id,
+            'aria-invalid': error ? 'true' : children.props['aria-invalid'],
+            'aria-describedby': children.props['aria-describedby'] ?? (describedBy || undefined),
+        })
+        : children;
+
     return (
         <div className={`mb-4 ${className}`}>
             <label htmlFor={id} className="mb-1 block text-base font-medium text-gray-900">
@@ -53,7 +73,7 @@ export default function FormField({
                 </p>
             )}
 
-            {children ?? (
+            {control ?? (
                 <input
                     id={id}
                     name={name}

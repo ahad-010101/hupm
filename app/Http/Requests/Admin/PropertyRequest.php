@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Support\Counties;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -51,8 +52,28 @@ class PropertyRequest extends BaseFormRequest
 
             $this->assertStateBelongsToCountry($validator);
             $this->assertCityBelongsToState($validator);
+            $this->assertCountyBelongsToState($validator);
             $this->assertPostalCode($validator);
         });
+    }
+
+    /**
+     * The same cascade rule as city, applied to county.  [FR-NTF-03]
+     *
+     * Only where a list exists to check against — outside Georgia the field is
+     * free text and there is nothing to verify, so nothing is rejected. That
+     * matches the postal-code reasoning: refusing an address we cannot check is
+     * worse than accepting an odd one.
+     *
+     * Where a list does exist the check is exact, because the county is matched
+     * against the weather service's own spelling. "Dekalb" would store happily
+     * and then never match an alert again.
+     */
+    private function assertCountyBelongsToState(Validator $validator): void
+    {
+        if (! Counties::valid($this->input('state'), $this->input('county'))) {
+            $validator->errors()->add('county', 'Choose a county from the list.');
+        }
     }
 
     private function assertStateBelongsToCountry(Validator $validator): void

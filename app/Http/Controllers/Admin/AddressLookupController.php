@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Support\Counties;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,20 @@ class AddressLookupController extends Controller
             ->all());
 
         return response()->json(['states' => $states]);
+    }
+
+    /**
+     * Counties for a state.  [FR-NTF-03]
+     *
+     * Keyed by state *name*, not id, because these do not come from the world
+     * tables — {@see Counties} holds them, and an empty list is a legitimate
+     * answer meaning "we have none for this state, offer a text box".
+     */
+    public function counties(Request $request): JsonResponse
+    {
+        return response()->json([
+            'counties' => Counties::forState($request->string('state')->value()),
+        ]);
     }
 
     public function cities(Request $request): JsonResponse

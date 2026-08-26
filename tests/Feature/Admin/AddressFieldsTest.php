@@ -2,6 +2,8 @@
 
 use App\Models\Property;
 use App\Models\User;
+use App\Support\Counties;
+use Database\Seeders\TestAddressSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /*
@@ -18,7 +20,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    $this->seed(Database\Seeders\TestAddressSeeder::class);
+    $this->seed(TestAddressSeeder::class);
     $this->admin = User::factory()->admin()->create();
 });
 
@@ -180,3 +182,105 @@ it('pre-loads states and cities when editing, so nothing flashes empty', functio
             ->has('cities')
             ->where('selectedStateId', 1));
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | County — the fourth level of the cascade  [FR-NTF-03]
+ |--------------------------------------------------------------------------
+ |
+ | Not a formality. The National Weather Service names an alert's area as
+ | "Fulton; DeKalb; Cobb" and WeatherAlertService matches a property to an alert
+ | on that string alone, because there is no geocoder on this host. A county
+ | spelt "Dekalb" stores happily and then never matches an alert again, which is
+ | why this is a list wherever we hold one.
+ |
+ */
+
+it('holds all 159 Georgia counties, spelt as the weather service spells them', function () {
+    // The count is the check. A hand-typed list of 159 names is exactly the
+    // kind of data that loses one without anybody noticing.
+    expect(Counties::forState('Georgia'))->toHaveCount(159);
+
+    // The three the demo portfolio actually sits in, and the one whose spelling
+    // is the reason this is not a text box.
+    expect(Counties::forState('Georgia'))
+        ->toContain('Fulton')
+        ->toContain('DeKalb')
+        ->toContain('Cobb');
+});
+
+it('offers the county list for the state being edited', function () {
+    $property = Property::factory()->create(['state' => 'Georgia', 'city' => 'Atlanta']);
+
+    $this->actingAs($this->admin)
+        ->get("/admin/properties/{$property->id}/edit")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('counties.0', 'Appling')->has('counties', 159));
+});
+
+it('serves counties for a state, and an empty list where we hold none', function () {
+    $this->actingAs($this->admin)
+        ->getJson('/admin/address/counties?state=Georgia')
+        ->assertOk()
+        ->assertJsonCount(159, 'counties');
+
+    // Not an error — the form reads this as "offer a text box instead".
+    $this->actingAs($this->admin)
+        ->getJson('/admin/address/counties?state=California')
+        ->assertOk()
+        ->assertJsonPath('counties', []);
+});
+
+it('accepts a county from the list', function () {
+    $this->actingAs($this->admin)
+        ->post('/admin/properties', address(['county' => 'DeKalb']))
+        ->assertSessionHasNoErrors();
+
+    expect(Property::sole()->county)->toBe('DeKalb');
+});
+
+it('refuses a county that is not in the chosen state', function () {
+    // The dropdown makes this unreachable in a browser; a crafted POST does not
+    // go through the dropdown.
+    $this->actingAs($this->admin)
+        ->post('/admin/properties', address(['county' => 'Dekalb']))
+        ->assertSessionHasErrors('county');
+
+    $this->actingAs($this->admin)
+        ->post('/admin/properties', address(['county' => 'Maricopa']))
+        ->assertSessionHasErrors('county');
+
+    expect(Property::count())->toBe(0);
+});
+
+it('accepts a blank county, because it is optional', function () {
+    $this->actingAs($this->admin)
+        ->post('/admin/properties', address(['county' => '']))
+        ->assertSessionHasNoErrors();
+
+    // Null rather than an empty string — Laravel converts one to the other on
+    // the way in, and WeatherAlertService trims before testing, so the two are
+    // the same answer to it: no county recorded, take every state-wide alert.
+    expect(Property::sole()->county)->toBeNull();
+});
+
+it('takes a typed county for a state we hold no list for', function () {
+    // Nothing to check it against, and refusing an address we cannot verify is
+    // worse than accepting an odd one — the same reasoning as the postal code.
+    $this->actingAs($this->admin)
+        ->post('/admin/properties', address([
+            'state' => 'California',
+            'city' => 'Los Angeles',
+            'postal_code' => '90001',
+            'county' => 'Los Angeles',
+        ]))
+        ->assertSessionHasNoErrors();
+
+    expect(Property::sole()->county)->toBe('Los Angeles');
+});
+
+it('keeps the county lookup behind admin auth', function (string $role) {
+    $this->actingAs(User::factory()->{$role}()->create())
+        ->getJson('/admin/address/counties?state=Georgia')
+        ->assertForbidden();
+})->with(['tenant', 'owner']);

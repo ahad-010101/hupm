@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PropertyRequest;
 use App\Models\Property;
 use App\Support\AuditLogger;
+use App\Support\Counties;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -126,6 +127,9 @@ class PropertyController extends Controller
                     ->all())
                 : [],
             'selectedStateId' => $stateId,
+            // Empty for a state we hold no list for, which the form reads as
+            // "offer a text box instead" rather than as an error.
+            'counties' => Counties::forState($stateName),
         ];
     }
 
