@@ -1,5 +1,6 @@
 <?php
 
+use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /*
@@ -54,7 +55,7 @@ it('loads no JavaScript bundle on the public site', function () {
 
 it('AC-PUB-01 exposes no tenant data on any public route', function (string $route) {
     // Demo data exists in the database; none of it may reach a public page.
-    $this->seed(Database\Seeders\DemoDataSeeder::class);
+    $this->seed(DemoDataSeeder::class);
 
     $tenant = DB::table('tenants')->first();
 

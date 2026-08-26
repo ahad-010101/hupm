@@ -69,6 +69,16 @@ class SettingsSeeder extends Seeder
             ['company.address', '', 'string', false, 'Public mailing address.'],
             ['company.emergency_phone', '', 'string', false,
                 'Shown on the Emergency Maintenance Instructions page. Must be set before go-live.'],
+            ['company.email', '', 'string', false,
+                'Where the public contact form delivers. While it is blank the form is withdrawn and '
+                .'the telephone number offered instead, rather than accepting messages nobody receives.'],
+            ['company.office_hours', '', 'string', false,
+                'Shown on the public contact and about pages, so a caller knows whether anyone is there.'],
+
+            // ── Public site ─────────────────────────────────────────────────
+            ['public.available_properties', '', 'string', false,
+                'WP-18. Listings for the public Properties page, one per line. Never a query over vacant '
+                .'units — a public list of empty homes is a public statement about who is not at home (BR-22).'],
 
             // ── Operational thresholds ──────────────────────────────────────
             ['reconciliation.stale_hours', '36', 'int', false,

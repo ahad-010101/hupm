@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\HandleInertiaRequests;
+
 /*
 |--------------------------------------------------------------------------
 | Dual rendering pipeline  [WP-00L DoD, DEVIATION D-05]
@@ -35,7 +37,7 @@ it('renders an application page through Inertia', function () {
 it('keeps HandleInertiaRequests off the public middleware group', function () {
     $middleware = app('router')->getMiddlewareGroups()['public'] ?? [];
 
-    expect($middleware)->not->toContain(\App\Http\Middleware\HandleInertiaRequests::class);
+    expect($middleware)->not->toContain(HandleInertiaRequests::class);
 });
 
 it('serves the public stylesheet without loading a JavaScript bundle', function () {

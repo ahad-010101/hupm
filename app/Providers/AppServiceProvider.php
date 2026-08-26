@@ -52,6 +52,42 @@ class AppServiceProvider extends ServiceProvider
                 ], 429));
         });
 
+        /*
+         | Public contact form (AC-PUB-02). Three an hour per address.
+         |
+         | Keyed on the IP because there is nobody signed in to key on, which
+         | makes this the one limit in the system that can catch a real person:
+         | an office block or a library shares an address. Three is chosen to
+         | sit well above one honest enquiry and well below anything worth
+         | automating, and the refusal says to telephone instead — a limit that
+         | leaves somebody with no way to reach the office is not a limit, it is
+         | an outage.
+        */
+        RateLimiter::for('contact', fn ($request) => Limit::perHour(3)
+            ->by('ip:'.$request->ip())
+            ->response(fn () => redirect()->route('public.contact')
+                ->withInput($request->except('message'))
+                ->withErrors(['message' => 'That is several messages in a short time. '
+                    .'Please telephone the office if this is urgent.'])));
+
+        /*
+         | Turn Vite's asset prefetching off for the public site.  [D-05]
+         |
+         | Vite::prefetch() below injects an inline <script> into *every* @vite
+         | call and uses it to pull down the manifest's assets — which on a
+         | public page means fetching the React bundle that page will never run.
+         |
+         | The whole reason the public site is Blade is that Emergency
+         | Maintenance Instructions must render with no JavaScript, on a poor
+         | connection, at the worst possible moment. A prefetch script is
+         | JavaScript, and the bundle it pulls is the exact download that
+         | connection cannot spare.
+         |
+         | Disabled here rather than globally: the portal and admin console are
+         | app shells behind a login, where prefetching is worth having.
+        */
+        View::composer('public.*', fn () => Vite::usePrefetchStrategy(null));
+
         // Company details for the public Blade layout (UI §2.1). A composer
         // rather than View::share so the query runs only when a public page is
         // actually rendered — not on every console command, and not during
@@ -63,6 +99,11 @@ class AppServiceProvider extends ServiceProvider
                 'name' => $settings->string('company.name', config('app.name')),
                 'phone' => $settings->string('company.phone'),
                 'address' => $settings->string('company.address'),
+                // Blank until the client supplies them. The contact page offers
+                // the telephone instead of a form that delivers nowhere, and
+                // says nothing at all about hours rather than guessing them.
+                'email' => $settings->string('company.email'),
+                'office_hours' => $settings->string('company.office_hours'),
                 // [GATE] Unset until the client supplies it. WP-35 blocks
                 // go-live while empty — the layout says so rather than
                 // rendering a blank space where a number should be.

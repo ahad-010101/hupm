@@ -66,6 +66,20 @@ class SettingsCatalogue
                 'help' => 'Used on generated documents and the public contact page.',
                 'input' => 'text',
             ],
+            'company.email' => [
+                'group' => 'Company',
+                'label' => 'Office email address',
+                'help' => 'Where the public contact form delivers. While it is blank the form is '
+                    .'replaced by the office telephone number rather than accepting messages nobody receives.',
+                'input' => 'text',
+            ],
+            'company.office_hours' => [
+                'group' => 'Company',
+                'label' => 'Office hours',
+                'help' => 'Shown on the contact page, so somebody knows whether a call will be answered now. '
+                    .'Free text, e.g. "Monday to Friday, 9am to 5pm".',
+                'input' => 'text',
+            ],
             'company.timezone' => [
                 'group' => 'Company',
                 'label' => 'Business timezone',
@@ -232,6 +246,18 @@ class SettingsCatalogue
                 'min' => 0,
                 'max' => 3650,
             ],
+            /*
+             | Public site. Content the office maintains, not a CMS —
+             | HUPM is not building a listing engine with applications or
+             | screening, and nothing here may touch occupancy (BR-22).
+             */
+            'public.available_properties' => [
+                'group' => 'Public site',
+                'label' => 'Available properties',
+                'help' => 'Shown on the public Properties page, one listing per line. Leave it blank and the page invites an enquiry instead of showing an empty list. Never write a resident name or a unit number somebody currently lives in.',
+                'input' => 'textarea',
+                'max' => 5000,
+            ],
         ];
     }
 
@@ -266,6 +292,9 @@ class SettingsCatalogue
             'number' => ctype_digit($value)
                 && (int) $value >= ($spec['min'] ?? 0)
                 && (int) $value <= ($spec['max'] ?? PHP_INT_MAX),
+            // Long-form copy for the public site. The column is TEXT, but a
+            // ceiling still applies — a settings row is not a document store.
+            'textarea' => mb_strlen($value) <= ($spec['max'] ?? 5000),
             // Free text still has a ceiling; the column is not unbounded.
             default => mb_strlen($value) <= 255,
         };

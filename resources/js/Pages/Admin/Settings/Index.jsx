@@ -57,6 +57,18 @@ function Field({ setting, onSaved }) {
             );
         }
 
+        if (setting.input === 'textarea') {
+            return (
+                <textarea
+                    value={form.data.value}
+                    onChange={(e) => form.setData('value', e.target.value)}
+                    rows={8}
+                    maxLength={setting.max ?? 5000}
+                    className="w-full rounded-md border-gray-300 text-base"
+                />
+            );
+        }
+
         return (
             <input
                 type={setting.input === 'number' ? 'number' : 'text'}

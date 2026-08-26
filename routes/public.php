@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Controllers\Public\ContactController;
 use App\Http\Controllers\Public\HealthController;
+use App\Http\Controllers\Public\PropertiesController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -11,41 +13,44 @@ use Illuminate\Support\Facades\Route;
 | Registered against the 'public' middleware group in bootstrap/app.php, which
 | omits HandleInertiaRequests. Nothing in this file may return Inertia::render().
 |
-| The routes exist now so the WP-05 shell has real navigation to render and
-| test; WP-18 replaces the placeholder bodies with the content in UI §1 and
-| adds the rate-limited contact form.
-|
 | BR-22 / AC-PUB-01: no response from this file may contain a tenant name,
-| balance, lease detail or maintenance data.
+| balance, lease detail or maintenance data. Note what that rules out — none of
+| these routes reads the tenant tables at all, which is what makes the guarantee
+| structural rather than a filter somebody has to remember.
 |
 */
 
 Route::view('/', 'public.home')->name('public.home');
 
-Route::view('/about', 'public.placeholder')->name('public.about')
-    ->defaults('heading', 'About Heads Up Enterprises');
+Route::view('/about', 'public.about')->name('public.about');
 
-Route::view('/properties', 'public.placeholder')->name('public.properties')
-    ->defaults('heading', 'Available Properties');
+/*
+ | Available properties (BR-22). Static copy the office maintains through a
+ | setting — not a query over vacant units, which would publish occupancy.
+ */
+Route::get('/properties', PropertiesController::class)->name('public.properties');
 
-Route::view('/resources', 'public.placeholder')->name('public.resources')
-    ->defaults('heading', 'Resident Resources');
+Route::view('/resources', 'public.resources')->name('public.resources');
 
-Route::view('/georgia-rental-info', 'public.placeholder')->name('public.georgia')
-    ->defaults('heading', 'Georgia Rental Information & DCA');
+Route::view('/georgia-rental-info', 'public.georgia')->name('public.georgia');
 
-// The reason the public site is Blade at all: this page must render with no
-// JavaScript, on a poor connection, at the worst possible moment (D-05).
-Route::view('/emergency-maintenance', 'public.placeholder')->name('public.emergency')
-    ->defaults('heading', 'Emergency Maintenance Instructions');
+/*
+ | The reason the public site is Blade at all: this page must render with no
+ | JavaScript, on a poor connection, at the worst possible moment (D-05).
+ */
+Route::view('/emergency-maintenance', 'public.emergency')->name('public.emergency');
 
-Route::view('/contact', 'public.placeholder')->name('public.contact')
-    ->defaults('heading', 'Contact Us');
+Route::get('/contact', [ContactController::class, 'show'])->name('public.contact');
+Route::post('/contact', [ContactController::class, 'store'])
+    // AC-PUB-02. Three an hour per address, and the refusal points at the
+    // telephone rather than leaving somebody with no way to reach the office.
+    ->middleware('throttle:contact')
+    ->name('public.contact.send');
 
-Route::view('/privacy', 'public.placeholder')->name('public.privacy')
+Route::view('/privacy', 'public.legal')->name('public.privacy')
     ->defaults('heading', 'Privacy Policy');
 
-Route::view('/terms', 'public.placeholder')->name('public.terms')
+Route::view('/terms', 'public.legal')->name('public.terms')
     ->defaults('heading', 'Terms of Use');
 
 /*
