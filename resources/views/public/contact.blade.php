@@ -14,7 +14,14 @@
 @section('meta_description', 'Telephone, write to, or email the office.')
 
 @section('content')
-    <h1 class="text-3xl font-semibold">Contact us</h1>
+    {{-- Editable copy above the form. The form below stays in code. --}}
+    @foreach ($sections ?? [] as $section)
+        @include('public.sections.'.$section['type'], ['s' => $section['payload']])
+    @endforeach
+
+    @if (empty($sections))
+        <h1 class="text-3xl font-semibold">Contact us</h1>
+    @endif
 
     @if (session('status'))
         {{-- Neutral rather than green. The green token is `credit`, which means

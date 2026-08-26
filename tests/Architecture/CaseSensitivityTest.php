@@ -129,6 +129,23 @@ it('resolves every Blade view reference with exact case', function () {
         preg_match_all("/@(?:extends|include|includeIf)\(\s*'([^']+)'/", $source, $matches);
 
         foreach ($matches[1] as $view) {
+            /*
+             | A trailing dot means the name is built at runtime —
+             | `@include('public.sections.'.$section['type'])`, the WP-36 section
+             | renderer. There is no file to check the case of, because the file
+             | is chosen per row.
+             |
+             | Skipped here rather than exempted quietly: what the dynamic
+             | include needs is proof that every type in the library has a
+             | partial, and that is asserted directly in
+             | tests/Feature/Admin/WebsiteEditorTest.php — "has a Blade partial
+             | for every section type it offers". This test cannot do that job,
+             | and pretending otherwise would be worse than saying so.
+            */
+            if (str_ends_with($view, '.')) {
+                continue;
+            }
+
             $target = $viewRoot.'/'.str_replace('.', '/', $view).'.blade.php';
 
             if (! existsWithExactCase($target)) {

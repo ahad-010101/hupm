@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Domain\Content\PageContent;
 use App\Models\User;
 use App\Support\AuditLogger;
 use App\Support\BusinessCalendar;
@@ -87,6 +88,31 @@ class AppServiceProvider extends ServiceProvider
          | app shells behind a login, where prefetching is worth having.
         */
         View::composer('public.*', fn () => Vite::usePrefetchStrategy(null));
+
+        /*
+         | The public header navigation, from the content table.  [WP-36, D-27]
+         |
+         | So a page appears in the nav by being published, not by somebody
+         | editing the layout — which is how /services arrives.
+         |
+         | **Falls back to a literal list when the query returns nothing.** A
+         | fresh database, a first request after a deploy that cleared the
+         | cache before the seeder ran, a half-finished migration: any of them
+         | would otherwise produce a site with no navigation at all, which is
+         | a far worse failure than a slightly stale menu.
+        */
+        View::composer('public.*', function ($view): void {
+            $links = $this->app->make(PageContent::class)->navigation();
+
+            $view->with('navigation', $links ?: [
+                ['route' => 'public.home', 'label' => 'Home'],
+                ['route' => 'public.about', 'label' => 'About'],
+                ['route' => 'public.services', 'label' => 'Services'],
+                ['route' => 'public.properties', 'label' => 'Properties'],
+                ['route' => 'public.resources', 'label' => 'Resources'],
+                ['route' => 'public.contact', 'label' => 'Contact'],
+            ]);
+        });
 
         // Company details for the public Blade layout (UI §2.1). A composer
         // rather than View::share so the query runs only when a public page is

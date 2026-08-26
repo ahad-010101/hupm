@@ -246,18 +246,6 @@ class SettingsCatalogue
                 'min' => 0,
                 'max' => 3650,
             ],
-            /*
-             | Public site. Content the office maintains, not a CMS —
-             | HUPM is not building a listing engine with applications or
-             | screening, and nothing here may touch occupancy (BR-22).
-             */
-            'public.available_properties' => [
-                'group' => 'Public site',
-                'label' => 'Available properties',
-                'help' => 'Shown on the public Properties page, one listing per line. Leave it blank and the page invites an enquiry instead of showing an empty list. Never write a resident name or a unit number somebody currently lives in.',
-                'input' => 'textarea',
-                'max' => 5000,
-            ],
         ];
     }
 

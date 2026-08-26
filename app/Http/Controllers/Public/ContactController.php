@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Public;
 
+use App\Domain\Content\PageContent;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Public\ContactRequest;
 use App\Mail\ContactMessage;
@@ -29,6 +30,7 @@ class ContactController extends Controller
     public function __construct(
         private readonly Settings $settings,
         private readonly BusinessCalendar $calendar,
+        private readonly PageContent $content,
     ) {}
 
     /** API-PUB-05. */
@@ -39,6 +41,11 @@ class ContactController extends Controller
             // request can tell a person from something that posted instantly.
             'startedAt' => time(),
             'canSend' => $this->officeEmail() !== '',
+            // Editable copy above the form (WP-36). The form itself stays in
+            // code: the honeypot, the timing trap, the CSRF token and the
+            // no-office-email fallback were all reviewed as a piece, and none
+            // of them is content.
+            'sections' => $this->content->forSlug('contact')['sections'],
         ]);
     }
 

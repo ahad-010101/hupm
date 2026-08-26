@@ -30,13 +30,10 @@
             <a href="{{ route('public.home') }}" class="text-lg font-semibold">{{ $company['name'] }}</a>
 
             <nav aria-label="Main" class="flex flex-wrap items-center gap-x-4 gap-y-1">
-                @foreach ([
-                    'public.home' => 'Home',
-                    'public.about' => 'About',
-                    'public.properties' => 'Properties',
-                    'public.resources' => 'Resources',
-                    'public.contact' => 'Contact',
-                ] as $name => $label)
+                {{-- From the content table (WP-36), with a literal fallback in
+                     the composer so a site with no content still has a menu. --}}
+                @foreach ($navigation as $item)
+                    @php $name = $item['route']; $label = $item['label']; @endphp
                     <a href="{{ route($name) }}"
                        @if (request()->routeIs($name)) aria-current="page" @endif
                        class="inline-flex min-h-touch items-center text-base

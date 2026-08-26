@@ -1,6 +1,9 @@
 <?php
 
+use App\Domain\Content\PageContent;
+use App\Models\ContentPage;
 use App\Support\Settings;
+use Database\Seeders\ContentSeeder;
 use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -25,11 +28,22 @@ use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
+/*
+ | The public pages render from the database now (WP-36, D-27), and
+ | RefreshDatabase starts every test with an empty one. Seeded explicitly
+ | here rather than through a global hook: the copy these tests assert is
+ | the copy the seeder ships, and a fixture that appeared by magic would
+ | make the next failure unexplainable.
+ */
+beforeEach(function () {
+    $this->seed(ContentSeeder::class);
+});
+
 /** Every public route, so a new one cannot be added without appearing here. */
 function publicRoutes(): array
 {
     return [
-        '/', '/about', '/properties', '/resources', '/georgia-rental-info',
+        '/', '/about', '/services', '/properties', '/resources', '/georgia-rental-info',
         '/emergency-maintenance', '/contact', '/privacy', '/terms',
     ];
 }
@@ -125,17 +139,31 @@ it('tells a prospective resident that vacancies are not listed live', function (
 });
 
 it('shows the listings the office has written, one per line', function () {
-    app(Settings::class)->set(
-        'public.available_properties',
-        "2 bed, Decatur, $1,150 pcm\n\n3 bed, East Point, $1,400 pcm\n",
-    );
+    // Rewritten for WP-36. This drove the feature through the
+    // `public.available_properties` setting, which has been retired — listings
+    // are a section on the properties page now. The behaviour under test is
+    // unchanged, including that a blank line is not a listing.
+    $page = ContentPage::where('slug', 'properties')->sole();
+
+    $page->sections()->where('type', 'listings')->sole()->update([
+        'payload' => [
+            'heading' => 'Currently advertised',
+            'intro' => '',
+            'entries' => '2 bed, Decatur, $1,150 pcm
+
+3 bed, East Point, $1,400 pcm
+',
+            'empty_text' => 'We have nothing advertised at the moment.',
+        ],
+    ]);
+
+    app(PageContent::class)->flush();
 
     $response = $this->get('/properties')->assertOk();
 
     $response->assertSee('2 bed, Decatur', escape: false);
     $response->assertSee('3 bed, East Point', escape: false);
-    // The blank line between them is not a listing.
-    expect(substr_count($response->getContent(), '<li class="rounded-lg'))->toBe(2);
+    expect(substr_count($response->getContent(), '<li class="rounded-xl'))->toBe(2);
 });
 
 it('points at the state’s own material rather than our reading of it', function () {

@@ -10,6 +10,7 @@ import {
     ChartBarIcon,
     ClipboardDocumentCheckIcon,
     Cog6ToothIcon,
+    GlobeAltIcon,
     DocumentTextIcon,
     ExclamationTriangleIcon,
     FolderIcon,
@@ -77,6 +78,10 @@ const NAV_GROUPS = [
             { href: '/admin/import', label: 'Import', icon: ArrowUpTrayIcon },
             { href: '/admin/vendors', label: 'Vendors', icon: TruckIcon },
             { href: '/admin/users', label: 'Users', icon: UserGroupIcon },
+            // Public site (WP-36). UI §2.3 fixes this group as Import ·
+            // Vendors · Users · Settings; D-27 adds one before Settings, since
+            // editing the website is configuration rather than operations.
+            { href: '/admin/website', label: 'Public site', icon: GlobeAltIcon },
             { href: '/admin/settings', label: 'Settings', icon: Cog6ToothIcon },
         ],
     },

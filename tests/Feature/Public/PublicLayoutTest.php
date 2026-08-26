@@ -1,5 +1,6 @@
 <?php
 
+use Database\Seeders\ContentSeeder;
 use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -10,6 +11,17 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 */
 
 uses(RefreshDatabase::class);
+
+/*
+ | The public pages render from the database now (WP-36, D-27), and
+ | RefreshDatabase starts every test with an empty one. Seeded explicitly
+ | here rather than through a global hook: the copy these tests assert is
+ | the copy the seeder ships, and a fixture that appeared by magic would
+ | make the next failure unexplainable.
+ */
+beforeEach(function () {
+    $this->seed(ContentSeeder::class);
+});
 
 it('serves every public route without Inertia', function (string $route) {
     $response = $this->get($route);

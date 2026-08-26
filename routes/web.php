@@ -21,6 +21,7 @@ use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Admin\WeatherAlertController;
+use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\DocumentController;
 use App\Http\Controllers\Portal\LedgerController as PortalLedgerController;
@@ -140,6 +141,26 @@ Route::middleware('auth')->group(function () {
         // `reports/{report}` cannot swallow `reports/rent-roll/export`.
         Route::get('reports/{report}/export', [ReportController::class, 'export'])->name('reports.export');
         Route::get('reports/{report?}', [ReportController::class, 'index'])->name('reports.index');
+
+        /*
+         | The public site (WP-36, D-27).
+         |
+         | Pages are edited, never created or deleted: `routes/public.php` is
+         | the complete list of public URLs and stays that way. So there is no
+         | POST to `website` and no DELETE on a page — only on a section.
+         */
+        Route::get('website', [WebsiteController::class, 'index'])->name('website.index');
+        Route::get('website/{page}', [WebsiteController::class, 'edit'])->name('website.edit');
+        Route::patch('website/{page}', [WebsiteController::class, 'update'])->name('website.update');
+
+        Route::post('website/{page}/sections', [WebsiteController::class, 'storeSection'])
+            ->name('website.sections.store');
+        Route::patch('website/{page}/sections/{section}', [WebsiteController::class, 'updateSection'])
+            ->whereNumber('section')->name('website.sections.update');
+        Route::post('website/{page}/sections/{section}/move', [WebsiteController::class, 'moveSection'])
+            ->whereNumber('section')->name('website.sections.move');
+        Route::delete('website/{page}/sections/{section}', [WebsiteController::class, 'destroySection'])
+            ->whereNumber('section')->name('website.sections.destroy');
 
         // Audit trail (API-ADM-41). One route, GET only. There is deliberately
         // no PUT, PATCH or DELETE anywhere for audit rows: the model refuses

@@ -75,11 +75,6 @@ class SettingsSeeder extends Seeder
             ['company.office_hours', '', 'string', false,
                 'Shown on the public contact and about pages, so a caller knows whether anyone is there.'],
 
-            // ── Public site ─────────────────────────────────────────────────
-            ['public.available_properties', '', 'string', false,
-                'WP-18. Listings for the public Properties page, one per line. Never a query over vacant '
-                .'units — a public list of empty homes is a public statement about who is not at home (BR-22).'],
-
             // ── Operational thresholds ──────────────────────────────────────
             ['reconciliation.stale_hours', '36', 'int', false,
                 'R-6. Hours without a successful reconciliation before the admin dashboard raises a banner.'],

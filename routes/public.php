@@ -2,7 +2,7 @@
 
 use App\Http\Controllers\Public\ContactController;
 use App\Http\Controllers\Public\HealthController;
-use App\Http\Controllers\Public\PropertiesController;
+use App\Http\Controllers\Public\PageController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -20,19 +20,23 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::view('/', 'public.home')->name('public.home');
+Route::get('/', PageController::class)->defaults('slug', 'home')->name('public.home');
 
-Route::view('/about', 'public.about')->name('public.about');
+Route::get('/about', PageController::class)->defaults('slug', 'about')->name('public.about');
+
+// New with WP-36. Resident-facing: what we handle for the people living in
+// our homes, not a pitch to landlords.
+Route::get('/services', PageController::class)->defaults('slug', 'services')->name('public.services');
 
 /*
- | Available properties (BR-22). Static copy the office maintains through a
- | setting — not a query over vacant units, which would publish occupancy.
+ | Available properties (BR-22). A `listings` section the office maintains —
+ | never a query over vacant units, which would publish occupancy.
  */
-Route::get('/properties', PropertiesController::class)->name('public.properties');
+Route::get('/properties', PageController::class)->defaults('slug', 'properties')->name('public.properties');
 
-Route::view('/resources', 'public.resources')->name('public.resources');
+Route::get('/resources', PageController::class)->defaults('slug', 'resources')->name('public.resources');
 
-Route::view('/georgia-rental-info', 'public.georgia')->name('public.georgia');
+Route::get('/georgia-rental-info', PageController::class)->defaults('slug', 'georgia')->name('public.georgia');
 
 /*
  | The reason the public site is Blade at all: this page must render with no
@@ -47,11 +51,9 @@ Route::post('/contact', [ContactController::class, 'store'])
     ->middleware('throttle:contact')
     ->name('public.contact.send');
 
-Route::view('/privacy', 'public.legal')->name('public.privacy')
-    ->defaults('heading', 'Privacy Policy');
+Route::get('/privacy', PageController::class)->defaults('slug', 'privacy')->name('public.privacy');
 
-Route::view('/terms', 'public.legal')->name('public.terms')
-    ->defaults('heading', 'Terms of Use');
+Route::get('/terms', PageController::class)->defaults('slug', 'terms')->name('public.terms');
 
 /*
  | Health (API-PUB-07, D-06). Not a page — JSON, for an uptime monitor.
