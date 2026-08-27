@@ -34,12 +34,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: PHP 8.2
+      - name: PHP 8.3
         uses: shivammathur/setup-php@v2
         with:
-          # The floor from composer.json, not the newest available. Testing on
-          # a version the host may not offer proves nothing about the host.
-          php-version: '8.2'
+          # 8.3 to match the host (HostGator runs 8.3.33) and the machines this
+          # is developed on.
+          #
+          # NOT composer.json's ^8.2 floor, which is about the RUNTIME set: the
+          # production install still resolves on 8.2 and that is what the floor
+          # claims. The dev tooling is what needs 8.3 — laravel/pint v1.30.5
+          # requires ^8.3.0 — so `composer install` WITH dev cannot run on 8.2
+          # at all, and a suite that will not install proves nothing about
+          # anything.
+          php-version: '8.3'
           extensions: bcmath, ctype, curl, fileinfo, gd, intl, mbstring, openssl, pdo_mysql, tokenizer, xml, zip
           coverage: none
 
