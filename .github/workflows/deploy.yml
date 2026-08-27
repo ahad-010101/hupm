@@ -193,7 +193,21 @@ jobs:
 
           # The application, WITHOUT public/ — that becomes a symlink to the
           # docroot on the server — and without anything the server owns.
+          # --mode is not cosmetic: it is what keeps the site out of a 403.
+          #
+          # GitHub's Ubuntu runners work under umask 002, so a checkout plus an
+          # npm build produces files at 664 and directories at 775 — group
+          # writable. tar records those modes, extraction preserves them, and
+          # then suexec/mod_lsapi refuses to execute ANY script that is group
+          # or world writable. It refuses with 403 and no explanation in the
+          # response, which is why static files kept returning 200 while every
+          # .php returned 403 and disabling .htaccess changed nothing: Apache
+          # was reading the file perfectly well and declining to hand it to
+          # the PHP handler.
+          #
+          # u=rwX,go=rX is exactly 644 for files and 755 for directories.
           tar -czf app.tar.gz \
+            --mode='u=rwX,go=rX' \
             --exclude='./.git' \
             --exclude='./.github' \
             --exclude='./node_modules' \
@@ -206,7 +220,9 @@ jobs:
             artisan composer.json composer.lock
 
           # The public assets, served directly by Apache.
-          tar -czf public.tar.gz -C public .
+          # Same for the document root, where it matters most — index.php
+          # is the one file the whole site depends on being executable.
+          tar -czf public.tar.gz --mode='u=rwX,go=rX' -C public .
 
           ls -lh app.tar.gz public.tar.gz
 
@@ -335,6 +351,11 @@ jobs:
           # public_path() must resolve to what Apache actually serves.
           ln -sfn "$DOCROOT"         "$DIR/public"
 
+          # Normalise anyway. The archive now carries correct modes, but the
+          # document root is a directory cPanel also writes into, and a single
+          # group-writable file there is enough for mod_lsapi to refuse the
+          # request with 403.
+          chmod -R u=rwX,go=rX "$DIR"
           chmod -R 755 "$DIR/bootstrap/cache" 2>/dev/null || true
           chmod +x "$DIR/artisan"
 
@@ -348,6 +369,10 @@ jobs:
           mkdir -p "$DOCROOT"
           tar -xzf "$HOME_DIR/public.tar.gz" -C "$DOCROOT"
           rm -f "$HOME_DIR/public.tar.gz"
+
+          # Directories 755, files 644, nothing group or world writable.
+          # Anything looser here is a 403 on every PHP request under LSAPI.
+          chmod -R u=rwX,go=rX "$DOCROOT"
 
           # Maintenance mode covers migrate + cache warm. The flag lives in
           # shared storage, so it applies to whichever release is current.
