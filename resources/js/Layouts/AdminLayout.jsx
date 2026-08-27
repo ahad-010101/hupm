@@ -19,7 +19,6 @@ import {
     PencilSquareIcon,
     ShieldCheckIcon,
     TruckIcon,
-    UserGroupIcon,
     UsersIcon,
     WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
@@ -77,7 +76,22 @@ const NAV_GROUPS = [
         items: [
             { href: '/admin/import', label: 'Import', icon: ArrowUpTrayIcon },
             { href: '/admin/vendors', label: 'Vendors', icon: TruckIcon },
-            { href: '/admin/users', label: 'Users', icon: UserGroupIcon },
+            /*
+             | Users (API-ADM-39) is hidden, not built — client decision,
+             | 26 Aug 2026: out of scope for now.
+             |
+             | UI §2.3 fixes this group as Import · Vendors · Users · Settings,
+             | so this is a deliberate departure from it. Restoring the entry is
+             | two lines once the screen exists — the entry below, plus the
+             | `UserGroupIcon` import that went with it:
+             |
+             |   { href: '/admin/users', label: 'Users', icon: UserGroupIcon },
+             |
+             | Worth knowing while it is gone: nothing in the product can create
+             | a staff account, and `AdminUserSeeder` refuses to run outside
+             | local. On the host the first admin is a hand-written INSERT, and
+             | a departing member of staff is suspended the same way.
+             */
             // Public site (WP-36). UI §2.3 fixes this group as Import ·
             // Vendors · Users · Settings; D-27 adds one before Settings, since
             // editing the website is configuration rather than operations.
