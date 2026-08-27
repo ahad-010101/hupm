@@ -316,6 +316,69 @@ Tick the two open WP-34 boxes and all five WP-00H boxes only after this.
 
 ---
 
+## Deploying from GitHub Actions instead
+
+Two workflows ship with the repo. They do the same thing as the stages above, in
+the same order, with the parts that get forgotten made structural.
+
+- `.github/workflows/ci.yml` — tests against **MySQL 8, not SQLite** (D-15: this
+  schema cannot be built on SQLite), Pint, `composer audit`, `npm audit`.
+- `.github/workflows/deploy.yml` — **manual only** (`workflow_dispatch`), gated on CI,
+  and pointed at a `production` environment so you can require an approval.
+
+**Why it is worth doing.** The runner has Node, so `public/build` is compiled on every
+deploy and cannot be forgotten — which is D-14 solved structurally rather than by a
+line in a checklist. It also rsyncs with `--exclude .env --exclude storage/`, so the
+deploy physically cannot remove the credentials or a tenant's documents.
+
+**Why it is manual.** This system moves rent, and ledger rows are immutable (I-3). A
+migration that runs because somebody merged a README change is not a trade this project
+should make.
+
+### Before it can run
+
+1. **Push the repo to GitHub.** There is no remote today.
+2. Generate a deploy key, put the public half in `~/.ssh/authorized_keys` on the host:
+   `ssh-keygen -t ed25519 -C hupm-deploy -f hupm-deploy -N ""`
+3. Pin the host key: `ssh-keyscan -p <port> <host>` — the workflow uses a known_hosts
+   file rather than `StrictHostKeyChecking=no`, because disabling that check to make a
+   deploy work is how a pipeline becomes the thing that ships to whoever answers.
+
+| Secret | |
+|---|---|
+| `SSH_PRIVATE_KEY` | the private half, no passphrase |
+| `SSH_KNOWN_HOSTS` | the `ssh-keyscan` output |
+| `SSH_HOST`, `SSH_USER` | cPanel account |
+| `HEALTH_TOKEN` | same value as the server's `.env` |
+
+| Variable | |
+|---|---|
+| `SSH_PORT` | **HostGator shared is commonly 2222, not 22** |
+| `DEPLOY_PATH` | `/home/cpaneluser/hupm` |
+| `PHP_CLI_PATH` | the absolute path from Stage 2.2 — never bare `php` |
+| `APP_URL` | `https://hupm.example.com` |
+
+### What it does not do
+
+- **It does not create `.env`, and it never touches it.** Stage 4 stays a manual,
+  once-only act on the server. Production credentials do not belong in a CI secret
+  store when they are already on the host.
+- **It does not roll back.** There are no release directories: on shared hosting the
+  document root is a fixed path, so this is an in-place rsync inside `artisan down`,
+  exactly as TDD §12.2 specifies. **A rollback is re-running the workflow from the
+  previous tag.** If a migration was applied, that is not enough — reverse it
+  deliberately, the same way a ledger correction is a reversing entry.
+- **It does not replace Stage 2.** The workflow assumes SSH exists, the port is known,
+  and `rsync` is installed. None of that is known until WP-00H has been run by hand.
+
+### After it succeeds
+
+It has already run `hupm:preflight`, `hupm:bank-data-sweep`, and checked the five
+security headers and that `/.env` is not served — the host half of the WP-34 DoD, on
+every deploy rather than once at go-live.
+
+---
+
 ## Redeploying later
 
 ```bash

@@ -1,0 +1,203 @@
+name: Deploy to HostGator
+
+# MANUAL ONLY, and deliberately so.
+#
+# This system moves rent. Ledger rows are immutable (I-3), corrections are
+# reversing entries, and a migration that runs because somebody merged a README
+# change is not a trade this project should make. Deploying is an act somebody
+# performs, at a time they chose, watching the output.
+#
+# The `production` environment below adds a second gate: configure it in
+# Settings → Environments with a required reviewer, and the job waits for an
+# approval before it touches anything.
+#
+# Everything host-specific is a secret or a variable, because none of it is
+# known until WP-00H has been run against the real account:
+#
+#   Secrets    SSH_PRIVATE_KEY   deploy key, no passphrase
+#              SSH_KNOWN_HOSTS   `ssh-keyscan -p <port> <host>` output
+#              SSH_HOST  SSH_USER
+#              HEALTH_TOKEN      to read /health's detail after deploying
+#   Variables  SSH_PORT          HostGator shared is commonly 2222, not 22
+#              DEPLOY_PATH       e.g. /home/cpaneluser/hupm
+#              PHP_CLI_PATH      e.g. /opt/cpanel/ea-php82/root/usr/bin/php
+#                                — NEVER bare `php`; the wrong path is the
+#                                  single most common shared-hosting failure
+#                                  and it fails silently (R-5)
+#              APP_URL           e.g. https://hupm.example.com
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run database migrations'
+        type: boolean
+        default: true
+      skip_tests:
+        description: 'Skip CI (emergency rollback only)'
+        type: boolean
+        default: false
+
+concurrency:
+  # Two deploys rsyncing the same tree at once is a corrupted install. Queue,
+  # never cancel: a half-finished rsync that gets cancelled is the worst state.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    if: ${{ !inputs.skip_tests }}
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: [ci]
+    # `always()` plus the explicit result check, so skip_tests can bypass CI
+    # without the job being skipped along with it.
+    if: ${{ always() && (inputs.skip_tests || needs.ci.result == 'success') }}
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, ctype, curl, fileinfo, gd, intl, mbstring, openssl, pdo_mysql, tokenizer, xml, zip
+          coverage: none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # Production dependency tree: no dev packages on the host, and the
+      # classmap optimised because there is no opcache preloading to lean on.
+      - name: Install PHP dependencies (production)
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-progress
+
+      # [D-14] Built here, every time. public/build is gitignored — committing
+      # hashed filenames makes every branch conflict — and there is no Node on
+      # the server. Building in CI is what makes "the deploy forgot the assets"
+      # impossible rather than merely unlikely. That failure is silent: correct
+      # HTML, every route 200, clean logs, and an unstyled column of links.
+      - name: Build assets
+        run: |
+          npm ci
+          npm run build
+          test -f public/build/manifest.json
+
+      # Written by `npm run dev`. If it ever reaches the server, every @vite
+      # call points visitors at localhost:5173 and the site has no CSS at all.
+      - name: Guard against a stale hot file
+        run: rm -f public/hot
+
+      - name: Authorise SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pinned host key, not StrictHostKeyChecking=no. Disabling the check
+          # to make a deploy work is how a deploy pipeline becomes the thing
+          # that ships to whoever answers on that address.
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Maintenance mode
+        run: |
+          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan down --retry=60" || true
+        # `|| true` for the first deploy only, when there is nothing there yet
+        # to put down.
+
+      - name: Upload
+        run: |
+          rsync -az --delete --checksum \
+            -e "ssh -p ${{ vars.SSH_PORT }}" \
+            --exclude='.env' \
+            --exclude='.git' \
+            --exclude='storage/' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
+            --exclude='public/hot' \
+            --exclude='.github/' \
+            app bootstrap config database public resources routes vendor \
+            artisan composer.json composer.lock \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ vars.DEPLOY_PATH }}/
+        # --delete so stale hashed assets do not accumulate forever, and
+        # --exclude storage/ and .env so it can never remove a tenant's
+        # documents or the only copy of the production credentials. Those two
+        # excludes are the difference between a deploy and an incident.
+        #
+        # --checksum rather than the default mtime comparison: rsync from a
+        # fresh CI checkout sees every file as new by timestamp, so without it
+        # every deploy reuploads vendor/ in full.
+
+      - name: Migrate, cache, and come back up
+        env:
+          PHP: ${{ vars.PHP_CLI_PATH }}
+          DIR: ${{ vars.DEPLOY_PATH }}
+        run: |
+          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash -s <<EOF
+            set -e
+            cd "$DIR"
+
+            if [ "${{ inputs.run_migrations }}" = "true" ]; then
+              "$PHP" artisan migrate --force
+            fi
+
+            # optimize:clear BEFORE the three caches, always. A cached config
+            # holding the previous .env is a deploy that appears to work and
+            # quietly uses yesterday's credentials.
+            "$PHP" artisan optimize:clear
+            "$PHP" artisan config:cache
+            "$PHP" artisan route:cache
+            "$PHP" artisan view:cache
+
+            "$PHP" artisan up
+          EOF
+
+      # The gate, not a formality. Fails the job if the host is not what the
+      # architecture assumes — including the two assets checks, which is the
+      # whole point of building in CI.
+      - name: Preflight
+        run: |
+          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan hupm:preflight"
+
+      # I-5. The database holds real tenant data now, so this asks whether a
+      # bank number is sitting in a column that is innocent by name.
+      - name: Bank data sweep
+        run: |
+          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan hupm:bank-data-sweep"
+
+      - name: Health and headers
+        run: |
+          set -e
+          curl -fsS "${{ vars.APP_URL }}/health" > /dev/null
+
+          # WP-34's host half: the five headers survive whatever sits in front
+          # of the application. The middleware sets them on every response;
+          # this checks nothing strips them.
+          headers=$(curl -fsSI "${{ vars.APP_URL }}/")
+          for h in "strict-transport-security" "x-content-type-options" "x-frame-options" "referrer-policy" "content-security-policy"; do
+            echo "$headers" | grep -qi "^$h:" || { echo "MISSING HEADER: $h"; exit 1; }
+          done
+
+          # And the two paths that must never be served.
+          for path in ".env" "composer.json"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.APP_URL }}/$path")
+            [ "$code" = "200" ] && { echo "EXPOSED: /$path"; exit 1; }
+          done
+          echo "Deploy verified."
+
+      - name: Put the site back up if anything above failed
+        if: failure()
+        run: |
+          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan up" || true
+        # A failed deploy must not leave the portal in maintenance mode
+        # overnight. This does NOT roll the code back — see the runbook: on
+        # shared hosting the rollback is redeploying the previous tag.

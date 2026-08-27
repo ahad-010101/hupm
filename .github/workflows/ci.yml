@@ -1,0 +1,94 @@
+name: CI
+
+# Every push and every pull request. This is the gate the deploy workflow
+# waits on — nothing reaches HostGator that has not been through it.
+
+on:
+  push:
+    branches: [main, 'wp/**']
+  pull_request:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # MySQL, not SQLite. [D-15] The stock phpunit.xml runs on SQLite
+      # in-memory, but this schema cannot be built there: the
+      # leases.active_unit_key generated column (D-03) and several JSON
+      # columns do not exist below MySQL 8. A suite that runs green on SQLite
+      # and cannot migrate on the host is worse than no suite.
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: hupm_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          # The floor from composer.json, not the newest available. Testing on
+          # a version the host may not offer proves nothing about the host.
+          php-version: '8.2'
+          extensions: bcmath, ctype, curl, fileinfo, gd, intl, mbstring, openssl, pdo_mysql, tokenizer, xml, zip
+          coverage: none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # A02/A06. Both must be clean before a deploy — this is the check that
+      # keeps Laravel 12 honest (D-13: Laravel 11 is EOL and every release from
+      # v11.31.0 is audit-blocked). Never silence it to make a build pass.
+      - name: composer audit
+        run: composer audit
+
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+      - name: Lint (Pint)
+        run: ./vendor/bin/pint --test
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          sed -i 's/^DB_DATABASE=.*/DB_DATABASE=hupm_test/' .env
+          sed -i 's/^DB_USERNAME=.*/DB_USERNAME=root/' .env
+          sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=/' .env
+
+      - name: Migrate
+        run: php artisan migrate --force
+
+      - name: Test
+        run: php artisan test
+
+      # Proves the front end compiles before anything tries to deploy it, and
+      # produces the artefact the deploy job ships. [D-14]
+      - name: Build assets
+        run: npm run build
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: vite-build
+          path: public/build
+          retention-days: 7
+          if-no-files-found: error
