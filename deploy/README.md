@@ -136,10 +136,8 @@ deploys until `DB_*`, `RESEND_API_KEY` and `HEALTH_TOKEN` are set.
 
 ## 4. The first deployment
 
-Run **Actions → Deploy to HostGator → Run workflow** with:
-
-- `run_migrations` — **true**
-- `tolerate_degraded_health` — **true** *(only this once — see below)*
+Run **Actions → Deploy to HostGator → Run workflow** with `run_migrations` set to
+**true**.
 
 Then, on the server:
 
@@ -168,11 +166,11 @@ Finally add the cron entry in cPanel → Cron Jobs, every minute:
 * * * * * /usr/local/bin/php /home5/jabrilgino/hupm/artisan schedule:run >> /dev/null 2>&1
 ```
 
-**Why `tolerate_degraded_health` on the first run only:** `/health` returns **503** when
-degraded, and it reports the scheduler heartbeat. Before that cron entry exists the
-heartbeat has never been written, so degraded is the honest answer. Once cron has run,
-re-deploy without the flag — from then on a 503 means something genuinely needs
-attention.
+**On `/health` after the first deploy:** it returns **503** when degraded, and it reports
+the scheduler heartbeat. Before the cron entry above exists the heartbeat has never been
+written, so degraded is the honest answer — not a fault. Once cron has run a couple of
+times, `curl -H "X-Health-Token: …" https://headsuppm.com/health` should say `ok`. From
+then on a 503 means something genuinely needs attention.
 
 ---
 
@@ -181,17 +179,41 @@ attention.
 Actions → Deploy to HostGator → Run workflow. Leave `run_migrations` on unless you know
 this release has none.
 
-**The deploy does not run the test suite.** `ci.yml` still runs on every push, so check
-that run is green for the commit you are shipping before you press the button. What the
-deploy still does is the cheap half — `php -l` over everything that will execute on the
-host, and a check that Vite actually produced a manifest — plus the post-deploy
-verification. Those catch a broken deploy; they do not catch a broken late fee.
+The workflow, in order: build `vendor/` and the Vite assets → rewrite `index.php` for
+the split root → tar → SSH → unpack to a new release → symlink shared state →
+`artisan down` → migrate → **swap the symlink** → clear and warm caches → `artisan up` →
+prune to the last five releases.
 
-The workflow, in order: build `vendor/` and the Vite assets → rewrite
-`index.php` for the split root → tar → SSH → unpack to a new release → symlink shared
-state → `artisan down` → migrate → **swap the symlink** → clear and warm caches →
-`artisan up` → `hupm:preflight` → `hupm:bank-data-sweep` → health check → security
-headers and exposure check → prune to the last five releases.
+### It verifies nothing
+
+**No test suite, and no post-deploy checks either.** A green run means the files arrived
+and the migration ran. It does not mean the site works.
+
+What still protects the deploy itself: `php -l` over everything that will execute on the
+host, a check that Vite produced a manifest, and the release symlink — which does not
+move until the unpack and the migration have both succeeded. So a failed deploy leaves
+the previous release serving.
+
+Run these yourself afterwards. They are all still built:
+
+```bash
+ssh -p 2222 jabrilgino@192.185.52.206 'cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:preflight'
+```
+
+```bash
+ssh -p 2222 jabrilgino@192.185.52.206 'cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:bank-data-sweep'
+```
+
+```bash
+curl -sI https://headsuppm.com/ | grep -i -E 'strict|x-|referrer|content-security'
+```
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://headsuppm.com/.env
+```
+
+That last one must not print `200`. And `ci.yml` still runs on every push — check that
+run is green for the commit you are shipping.
 
 ---
 

@@ -35,14 +35,28 @@ name: Deploy to HostGator
 # WHY MANUAL. This system moves rent, and ledger rows are immutable (I-3). A
 # migration must never run because somebody merged a README change.
 #
-# THIS WORKFLOW DOES NOT RUN THE TEST SUITE. [decision 2026-08-27]
-# ci.yml still runs on every push, so the suite has a home — it is simply not
-# a gate on deploying. What survives here is the cheap half: `php -l` over
-# everything that will execute on the host, a check that the Vite manifest was
-# actually produced, and the post-deploy verification (preflight, the I-5
-# sweep, security headers, the exposure check, /health). Those catch a broken
-# deploy; they do not catch a broken late fee. Look at the CI run for the
-# commit you are shipping before you press the button.
+# THIS WORKFLOW VERIFIES NOTHING AFTER DEPLOYING. [decision 2026-08-27]
+#
+# It does not run the test suite, and it does not run the post-deploy checks
+# either — no hupm:preflight, no hupm:bank-data-sweep, no /health, no security
+# header or exposure check. It ships the code and stops.
+#
+# What is left is only what protects the DEPLOY itself: `php -l` over
+# everything that will execute on the host, a check that Vite produced a
+# manifest, and the release symlink, which does not move until the unpack and
+# the migration have both succeeded.
+#
+# So a green run here means "the files arrived and the migration ran". It does
+# NOT mean the site works. Check these yourself after deploying — they are
+# still built and still worth running:
+#
+#     ssh hostgator "cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:preflight"
+#     ssh hostgator "cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:bank-data-sweep"
+#     curl -sI https://headsuppm.com/ | grep -i -E 'strict|x-|referrer|content-security'
+#     curl -s -o /dev/null -w '%{http_code}\n' https://headsuppm.com/.env    # must not be 200
+#
+# The HEALTH_TOKEN secret is no longer read by this workflow. Keep it in the
+# server's .env — /health still needs it to return its reasons to a monitor.
 
 on:
   workflow_dispatch:
@@ -51,10 +65,6 @@ on:
         description: 'Run database migrations'
         type: boolean
         default: true
-      tolerate_degraded_health:
-        description: 'Accept a 503 from /health (needed on the FIRST deploy, before cron has ever run)'
-        type: boolean
-        default: false
 
 concurrency:
   # Queue, never cancel. Two deploys extracting into the same tree is a
@@ -314,81 +324,6 @@ jobs:
 
           echo "==> Live release: $(readlink -f "$APP")"
           REMOTE
-
-      # ------------------------------------------------------------------
-      # Verify
-      # ------------------------------------------------------------------
-      - name: Preflight and bank-data sweep
-        env:
-          APP: ${{ vars.DEPLOY_PATH }}
-          PHP: ${{ vars.PHP_CLI_PATH }}
-        run: |
-          # The whole TDD §12.4 checklist, on the real host, reporting observed
-          # values rather than ticks. Includes the two asset checks, which is
-          # the point of building in CI.
-          ssh hostgator "cd '$APP' && '$PHP' artisan hupm:preflight"
-          # I-5: the database holds real tenant data now.
-          ssh hostgator "cd '$APP' && '$PHP' artisan hupm:bank-data-sweep"
-
-      - name: Health check
-        env:
-          APP_URL: ${{ vars.APP_URL }}
-        run: |
-          set -uo pipefail
-
-          # -H, never in the URL: a token in a query string lands in Apache's
-          # access log and in any proxy in between.
-          body=$(mktemp)
-          code=$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' \
-                   -H "X-Health-Token: ${{ secrets.HEALTH_TOKEN }}" \
-                   "$APP_URL/health") || code=000
-
-          echo "HTTP $code from $APP_URL/health"
-          # The body carries the reasons, never the token.
-          cat "$body"; echo
-
-          case "$code" in
-            200) echo "Healthy." ;;
-            503)
-              # Degraded is a real answer, not a transport failure. On the very
-              # FIRST deploy it is expected: /health reports the scheduler
-              # heartbeat, and cron has never run, so it is stale by
-              # definition. Add the cron entry, wait two minutes, re-check.
-              if [ "${{ inputs.tolerate_degraded_health }}" = "true" ]; then
-                echo "::warning::/health reports degraded; tolerated by request. Check the reasons above."
-              else
-                echo "::error::/health reports degraded. If this is the first deploy, add the cron entry and re-run with tolerate_degraded_health."
-                exit 1
-              fi
-              ;;
-            000) echo "::error::Could not reach $APP_URL/health at all."; exit 1 ;;
-            *)   echo "::error::Unexpected status $code from /health."; exit 1 ;;
-          esac
-
-      - name: Security headers and exposure
-        env:
-          APP_URL: ${{ vars.APP_URL }}
-        run: |
-          set -euo pipefail
-
-          # WP-34's host half: the middleware sets these on every response;
-          # this proves nothing in front of the application strips them.
-          headers=$(curl -fsSI --max-time 30 "$APP_URL/")
-          for h in strict-transport-security x-content-type-options x-frame-options referrer-policy content-security-policy; do
-            echo "$headers" | grep -qi "^$h:" \
-              || { echo "::error::Missing security header: $h"; exit 1; }
-          done
-          echo "All five security headers present."
-
-          # And the paths Apache must never serve. .env lives outside the
-          # document root by construction, so a 200 here means the layout is
-          # wrong, not that a rule is missing.
-          for path in .env composer.json composer.lock artisan README.md storage/logs/laravel.log; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$APP_URL/$path")
-            [ "$code" = "200" ] && { echo "::error::EXPOSED over HTTP: /$path"; exit 1; }
-            echo "  /$path -> $code"
-          done
-          echo "Nothing sensitive is served."
 
       - name: Bring the site back up if any step failed
         if: failure()
