@@ -34,6 +34,15 @@ name: Deploy to HostGator
 #
 # WHY MANUAL. This system moves rent, and ledger rows are immutable (I-3). A
 # migration must never run because somebody merged a README change.
+#
+# THIS WORKFLOW DOES NOT RUN THE TEST SUITE. [decision 2026-08-27]
+# ci.yml still runs on every push, so the suite has a home — it is simply not
+# a gate on deploying. What survives here is the cheap half: `php -l` over
+# everything that will execute on the host, a check that the Vite manifest was
+# actually produced, and the post-deploy verification (preflight, the I-5
+# sweep, security headers, the exposure check, /health). Those catch a broken
+# deploy; they do not catch a broken late fee. Look at the CI run for the
+# commit you are shipping before you press the button.
 
 on:
   workflow_dispatch:
@@ -44,10 +53,6 @@ on:
         default: true
       tolerate_degraded_health:
         description: 'Accept a 503 from /health (needed on the FIRST deploy, before cron has ever run)'
-        type: boolean
-        default: false
-      skip_ci:
-        description: 'Skip the test suite (emergency rollback only)'
         type: boolean
         default: false
 
@@ -61,15 +66,7 @@ env:
   DOCROOT: /home5/jabrilgino/public_html/website_0f94b77e
 
 jobs:
-  ci:
-    if: ${{ !inputs.skip_ci }}
-    uses: ./.github/workflows/ci.yml
-
   deploy:
-    needs: [ci]
-    # always() + the explicit result check, so skip_ci can bypass CI without
-    # this job being skipped alongside it.
-    if: ${{ always() && (inputs.skip_ci || needs.ci.result == 'success') }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
@@ -130,6 +127,8 @@ jobs:
           test -f public/build/manifest.json \
             || { echo "::error::npm run build produced no manifest"; exit 1; }
 
+      # Not a substitute for the suite — see the note at the top of this file.
+      # This is the floor: nothing ships that PHP cannot even parse.
       - name: Validate the application before shipping it
         run: |
           # public/hot is written by `npm run dev`. On the server it points

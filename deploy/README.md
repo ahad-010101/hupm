@@ -181,7 +181,13 @@ attention.
 Actions → Deploy to HostGator → Run workflow. Leave `run_migrations` on unless you know
 this release has none.
 
-The workflow, in order: run CI → build `vendor/` and the Vite assets → rewrite
+**The deploy does not run the test suite.** `ci.yml` still runs on every push, so check
+that run is green for the commit you are shipping before you press the button. What the
+deploy still does is the cheap half — `php -l` over everything that will execute on the
+host, and a check that Vite actually produced a manifest — plus the post-deploy
+verification. Those catch a broken deploy; they do not catch a broken late fee.
+
+The workflow, in order: build `vendor/` and the Vite assets → rewrite
 `index.php` for the split root → tar → SSH → unpack to a new release → symlink shared
 state → `artisan down` → migrate → **swap the symlink** → clear and warm caches →
 `artisan up` → `hupm:preflight` → `hupm:bank-data-sweep` → health check → security
