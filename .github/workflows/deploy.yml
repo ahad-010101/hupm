@@ -309,6 +309,25 @@ jobs:
           tar -xzf "$HOME_DIR/app.tar.gz" -C "$DIR"
           rm -f "$HOME_DIR/app.tar.gz"
 
+          # The storage tree Laravel expects, before anything symlinks to it.
+          #
+          # The tarball excludes ./storage and the release symlinks it out to
+          # shared state, so these directories exist ONLY if they were created
+          # here or by hostgator-setup.sh. When framework/views was missing,
+          # `optimize:clear` died on "View path not found." — the framework's
+          # default wraps that path in realpath(), which returns false rather
+          # than a path when the directory is not there. config/view.php now
+          # drops that wrapper, and this makes sure there is a directory
+          # regardless of whether the setup script was ever run.
+          mkdir -p "$SHARED/storage/framework/cache/data" \
+                   "$SHARED/storage/framework/sessions" \
+                   "$SHARED/storage/framework/views" \
+                   "$SHARED/storage/framework/testing" \
+                   "$SHARED/storage/app/private" \
+                   "$SHARED/storage/app/public" \
+                   "$SHARED/storage/logs"
+          chmod -R 755 "$SHARED/storage"
+
           # Shared state, symlinked in. Without this every deploy would wipe
           # every tenant document and the production credentials.
           ln -sfn "$SHARED/.env"     "$DIR/.env"
