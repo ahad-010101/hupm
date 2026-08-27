@@ -3,7 +3,6 @@ import { Link, router, usePage } from '@inertiajs/react';
 import Alert from '@/Components/Alert';
 import UserMenu from '@/Components/UserMenu';
 import {
-    ArrowUpTrayIcon,
     BanknotesIcon,
     BookOpenIcon,
     BuildingOffice2Icon,
@@ -74,7 +73,20 @@ const NAV_GROUPS = [
     {
         label: 'System',
         items: [
-            { href: '/admin/import', label: 'Import', icon: ArrowUpTrayIcon },
+            /*
+             | Import (API-ADM-36/37) is hidden, not built — client decision,
+             | 26 Aug 2026: out of scope for now.
+             |
+             |   { href: '/admin/import', label: 'Import', icon: ArrowUpTrayIcon },
+             |
+             | Hiding the link changes nothing about WP-08 itself, which is still
+             | the M1 gate and still blocked twice over: the Rent Manager export
+             | has not been supplied, and no real tenant financial data moves
+             | before the WP-00H host checklist passes. The plan is explicit that
+             | the importer is built against that export's real columns rather
+             | than an invented shape, so there was nothing to put behind this
+             | link that would not have been rebuilt.
+             */
             { href: '/admin/vendors', label: 'Vendors', icon: TruckIcon },
             /*
              | Users (API-ADM-39) is hidden, not built — client decision,
