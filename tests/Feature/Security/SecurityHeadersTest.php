@@ -196,6 +196,37 @@ it('TDD 6.3 accepts style attributes, which is a considered exception', function
     expect($policy)->toContain("style-src 'self' 'unsafe-inline'");
 });
 
+it('D-05 lets the dev server serve the public stylesheet', function () {
+    /*
+     | Regression. The first CSP added the dev-server origin to script-src and
+     | connect-src and stopped there, which broke the PUBLIC site and nothing
+     | else -- so it looked fine to anyone testing the portal.
+     |
+     | `resources/css/app.css` is its own Vite entry (D-05): the eight Blade
+     | pages load the stylesheet ALONE, with no JS bundle, so Emergency
+     | Maintenance renders with JavaScript disabled. In dev that is a real
+     | <link rel="stylesheet"> pointing at the dev server, and style-src 'self'
+     | blocks it. The Inertia side hid the problem, because app.jsx imports
+     | app.css and Vite injects it through a script that 'unsafe-inline'
+     | already allowed.
+     |
+     | Every directive that can carry an asset is checked, not just style-src.
+     | A webfont or an image added to the public pages later would fail the
+     | same way, silently, and only there.
+    */
+    config(['hupm.csp.allow_vite_dev_server' => true]);
+
+    $policy = $this->get('/')->headers->get('Content-Security-Policy');
+
+    foreach (['script-src', 'style-src', 'font-src', 'img-src', 'connect-src'] as $directive) {
+        $line = collect(explode('; ', $policy))
+            ->first(fn ($d) => str_starts_with($d, $directive.' '));
+
+        expect(str_contains((string) $line, 'http://localhost:5173'))
+            ->toBeTrue("{$directive} does not admit the Vite dev server: {$line}");
+    }
+});
+
 it('D-05 leaves the public pages with no script to allow', function () {
     // The CSP is the belt; this is the braces. The emergency page must render
     // with no JavaScript at all, which is the whole reason D-05 exists.

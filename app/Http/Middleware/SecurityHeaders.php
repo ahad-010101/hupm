@@ -83,6 +83,9 @@ class SecurityHeaders
     {
         $script = ["'self'", "'nonce-{$nonce}'"];
         $connect = ["'self'"];
+        $style = ["'self'", "'unsafe-inline'"];
+        $font = ["'self'"];
+        $image = ["'self'", 'data:'];
 
         /*
          | The Vite dev server, local only.
@@ -105,6 +108,26 @@ class SecurityHeaders
             $script[] = $origin;
             $connect[] = $origin;
             $connect[] = 'ws://localhost:5173 ws://127.0.0.1:5173 ws://[::1]:5173';
+
+            /*
+             | Styles, fonts and images too -- not only scripts.
+             |
+             | Missing this broke the PUBLIC site and nothing else, which is why
+             | it was not obvious. `resources/css/app.css` is its own Vite entry
+             | (D-05): the eight Blade pages load the stylesheet ALONE, with no
+             | JS bundle, so Emergency Maintenance renders with JavaScript off.
+             | In dev that means @vite emits a real
+             | `<link rel="stylesheet" href="http://[::1]:5173/...">`, and a
+             | style-src of 'self' blocks it.
+             |
+             | The Inertia side was fine throughout and hid the problem: app.jsx
+             | imports app.css, so Vite injects it through a script -- which
+             | 'unsafe-inline' already allowed. The portal looked perfect while
+             | the marketing site had no CSS at all.
+            */
+            $style[] = $origin;
+            $font[] = $origin;
+            $image[] = $origin;
         }
 
         $directives = [
@@ -116,11 +139,11 @@ class SecurityHeaders
             // XSS that style injection buys — data exfiltration through
             // attribute selectors — needs an injection point, and script-src
             // above is what denies those.
-            "style-src 'self' 'unsafe-inline'",
+            'style-src '.implode(' ', $style),
             // data: for the inline SVG and icon data URIs the bundle emits.
-            // No remote host: there are no third-party images anywhere.
-            "img-src 'self' data:",
-            "font-src 'self'",
+            // No remote host in production: there are no third-party images.
+            'img-src '.implode(' ', $image),
+            'font-src '.implode(' ', $font),
             'connect-src '.implode(' ', $connect),
             // Nothing is embedded and nothing may embed us. frame-ancestors is
             // the modern half of X-Frame-Options, which older browsers read.
