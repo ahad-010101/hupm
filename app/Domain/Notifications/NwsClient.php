@@ -64,15 +64,15 @@ class NwsClient
     {
         try {
             $response = Http::withHeaders([
-                    // NWS requires this and will 403 without it. An address they
-                    // can write to is the point, not the product name.
-                    'User-Agent' => sprintf(
-                        '%s (%s)',
-                        config('app.name', 'HUPM'),
-                        config('mail.from.address', 'admin@example.com'),
-                    ),
-                    'Accept' => 'application/geo+json',
-                ])
+                // NWS requires this and will 403 without it. An address they
+                // can write to is the point, not the product name.
+                'User-Agent' => sprintf(
+                    '%s (%s)',
+                    config('app.name', 'HUPM'),
+                    config('mail.from.address', 'admin@example.com'),
+                ),
+                'Accept' => 'application/geo+json',
+            ])
                 ->timeout(self::TIMEOUT_SECONDS)
                 ->retry(2, 500, throw: false)
                 ->get(self::BASE.'/alerts/active', ['area' => $state]);

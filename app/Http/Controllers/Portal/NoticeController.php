@@ -6,7 +6,6 @@ use App\Domain\Notifications\NoticeService;
 use App\Http\Controllers\Controller;
 use App\Models\Notice;
 use App\Models\NoticeAttachment;
-use App\Models\NoticeRecipient;
 use App\Support\AuditLogger;
 use Illuminate\Http\Request;
 use Inertia\Inertia;

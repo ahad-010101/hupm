@@ -4,6 +4,7 @@ use App\Domain\Notifications\NotificationService;
 use App\Domain\Notifications\NotificationTemplate;
 use App\Jobs\SendNotification;
 use App\Mail\TemplatedMail;
+use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -143,7 +144,7 @@ it('AC-NTF-03 surfaces undeliverable messages to admin', function () {
 
 it('sends to the two seeded tenants who have no email as not_deliverable', function () {
     Queue::fake();
-    $this->seed(Database\Seeders\DemoDataSeeder::class);
+    $this->seed(DemoDataSeeder::class);
 
     // Q-4 is unanswered; the demo portfolio deliberately contains tenants with
     // no address so this path is exercised by real data.

@@ -5,6 +5,7 @@ use App\Models\Lease;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -121,7 +122,7 @@ it('AC-REG-04 is enforced by the database, not only by validation', function () 
         'start_date' => '2026-01-01', 'end_date' => '2026-12-31',
         'total_contract_rent' => 900, 'tenant_portion' => 900, 'ha_portion' => 0,
         'status' => 'active', 'created_at' => now(), 'updated_at' => now(),
-    ]))->toThrow(Illuminate\Database\UniqueConstraintViolationException::class);
+    ]))->toThrow(UniqueConstraintViolationException::class);
 });
 
 it('AC-REG-04 still allows a new lease once the previous one ended', function () {

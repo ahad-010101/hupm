@@ -13,6 +13,7 @@ use App\Support\BusinessCalendar;
 use App\Support\Money;
 use App\Support\Settings;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -188,7 +189,7 @@ class DelinquencyService
      * Surfaced rather than silently corrected. Changing either clock is the
      * client's decision, and it belongs with Q-6.
      *
-     * @return \Illuminate\Support\Collection<int, Lease>
+     * @return Collection<int, Lease>
      */
     public function leasesTriggeringInsideGrace()
     {

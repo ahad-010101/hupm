@@ -14,6 +14,7 @@ use App\Models\Unit;
 use App\Models\User;
 use App\Support\ElectronicRecordsConsent;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -189,7 +190,9 @@ it('keeps the stored button label and the rendered one from drifting apart', fun
     $props = [];
     $this->actingAs($this->signer)->get("/portal/sign/{$request->id}")
         ->assertOk()
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     // One constant, sent to the browser and written to the evidence.
     expect($props['buttonLabel'])->toBe(SignatureController::BUTTON_LABEL);
@@ -282,7 +285,9 @@ it('surfaces a broken signature on the admin screen', function () {
 
     $props = [];
     $this->actingAs($this->admin)->get('/admin/signatures')
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     // Asked under pressure, usually the day before a hearing.
     expect($props['requests'][0]['integrity']['valid'])->toBeFalse();
@@ -436,7 +441,7 @@ it('refuses an expired request', function () {
     consentGiven();
     $request = $this->signatures->createRequest(
         $this->document, $this->tenant, $this->signer, $this->admin,
-        Carbon\CarbonImmutable::now()->addHour(),
+        CarbonImmutable::now()->addHour(),
     );
     $this->signatures->markScrolled($request, request());
 

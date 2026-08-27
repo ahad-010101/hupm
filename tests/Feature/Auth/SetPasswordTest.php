@@ -3,6 +3,7 @@
 use App\Domain\Auth\InvitationService;
 use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -60,7 +61,7 @@ it('never mass-assigns role, status or tenant_id from input', function () {
         'role' => 'admin',
         'status' => 'active',
         'tenant_id' => 99,
-    ]))->toThrow(Illuminate\Database\Eloquent\MassAssignmentException::class);
+    ]))->toThrow(MassAssignmentException::class);
 });
 
 it('sets a password from a valid link and activates the account', function () {

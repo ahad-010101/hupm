@@ -2,6 +2,7 @@
 
 namespace App\Domain\Payments;
 
+use App\Support\Money;
 use Illuminate\Support\Collection;
 
 /**
@@ -33,7 +34,7 @@ interface AllocationOrder
      * same charges have to produce the same allocation, or the same payment
      * lands differently depending on how the rows came back from MySQL.
      *
-     * @param  Collection<int, object{id:int, posted_on:string, category:string, outstanding:\App\Support\Money}>  $charges
+     * @param  Collection<int, object{id:int, posted_on:string, category:string, outstanding:Money}>  $charges
      * @return Collection<int, object>
      */
     public function sort(Collection $charges): Collection;

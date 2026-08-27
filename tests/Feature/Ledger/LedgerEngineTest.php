@@ -7,6 +7,7 @@ use App\Models\LedgerEntry;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Support\Money;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -316,9 +317,9 @@ it('treats a transition to the same status as a no-op', function () {
 
 it('lists outstanding charges oldest first', function () {
     $this->ledger->postCharge($this->lease, 'late_fee', 'tenant', Money::fromString('50.00'), 'Late fee', 'k:fee',
-        postedOn: Carbon\CarbonImmutable::parse('2026-01-06'));
+        postedOn: CarbonImmutable::parse('2026-01-06'));
     $this->ledger->postCharge($this->lease, 'rent', 'tenant', Money::fromString('500.00'), 'Rent', 'k:feb',
-        postedOn: Carbon\CarbonImmutable::parse('2026-02-01'));
+        postedOn: CarbonImmutable::parse('2026-02-01'));
 
     $outstanding = $this->balances->outstandingCharges($this->tenant->id);
 

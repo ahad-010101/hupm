@@ -19,6 +19,8 @@
 |
 */
 
+use App\Models\LedgerEntry;
+use App\Models\PaymentAllocation;
 use Illuminate\Support\Facades\Route;
 
 const LEDGER_TABLE = 'ledger_entries';
@@ -139,7 +141,7 @@ it('I-2 lets no other class write ledger_entries through the query builder', fun
 });
 
 it('I-2 keeps LedgerEntry unfillable, so nothing can mass-assign its way past the service', function () {
-    $model = new App\Models\LedgerEntry;
+    $model = new LedgerEntry;
 
     expect($model->getFillable())->toBe([])
         ->and($model->getGuarded())->toBe(['*']);
@@ -213,7 +215,7 @@ it('lets no other class write payment_allocations through the query builder', fu
 });
 
 it('D-02 un-allocates by stamping reversed_at, never by deleting', function () {
-    $model = new App\Models\PaymentAllocation;
+    $model = new PaymentAllocation;
 
     expect($model->getGuarded())->toBe(['*'])
         // The Immutable trait refuses a delete outright; `reversed_at` is the

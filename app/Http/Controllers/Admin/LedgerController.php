@@ -6,12 +6,12 @@ use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Ledger\LedgerService;
 use App\Domain\Payments\AllocationOrderRegistry;
 use App\Http\Controllers\Controller;
-use App\Models\Lease;
 use App\Models\LedgerEntry;
 use App\Models\Tenant;
 use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -177,7 +177,7 @@ class LedgerController extends Controller
      * One query rather than one per row: the ledger view is the screen most
      * likely to be left open on a tenant with three years of history.
      *
-     * @return array{0: \Illuminate\Support\Collection, 1: \Illuminate\Support\Collection}
+     * @return array{0: Collection, 1: Collection}
      */
     private function allocationsFor(Tenant $tenant): array
     {
@@ -194,8 +194,8 @@ class LedgerController extends Controller
     }
 
     /**
-     * @param  \Illuminate\Support\Collection  $byCharge
-     * @param  \Illuminate\Support\Collection  $byPayment
+     * @param  Collection  $byCharge
+     * @param  Collection  $byPayment
      * @return array<string, mixed>
      */
     private function allocationFieldsFor(LedgerEntry $entry, $byCharge, $byPayment): array

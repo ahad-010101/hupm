@@ -2,6 +2,8 @@
 
 use App\Domain\Notifications\NotificationTemplate;
 use App\Mail\TemplatedMail;
+use App\Support\Settings;
+use Database\Seeders\SettingsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /*
@@ -19,8 +21,8 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     // Templates read company details through the view composer, so the
     // configured values have to be present for these to reflect reality.
-    $this->seed(Database\Seeders\SettingsSeeder::class);
-    app(App\Support\Settings::class)->flush();
+    $this->seed(SettingsSeeder::class);
+    app(Settings::class)->flush();
 });
 
 /** Every variable any template might read, so rendering never fails on a missing key. */
@@ -127,8 +129,8 @@ it('loads no external stylesheet, webfont or image', function (NotificationTempl
 it('carries the emergency number in every message', function () {
     // [GATE] company.emergency_phone is unset, so the block is omitted rather
     // than rendering an empty label. Once set, it appears on every email.
-    app(App\Support\Settings::class)->set('company.emergency_phone', '(404) 555-0199');
-    app(App\Support\Settings::class)->flush();
+    app(Settings::class)->set('company.emergency_phone', '(404) 555-0199');
+    app(Settings::class)->flush();
 
     $rendered = (new TemplatedMail(
         NotificationTemplate::RentDue,

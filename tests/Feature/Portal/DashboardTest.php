@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Ledger\LedgerService;
 use App\Models\Document;
 use App\Models\HousingAuthority;
@@ -9,6 +10,7 @@ use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
 use App\Support\Money;
+use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -180,8 +182,8 @@ it('renders a credit as a credit, never as a minus figure', function () {
 });
 
 it('gives the address, the lease dates and the manager’s number', function () {
-    app(App\Support\Settings::class)->set('company.phone', '(404) 555-0142');
-    app(App\Support\Settings::class)->flush();
+    app(Settings::class)->set('company.phone', '(404) 555-0142');
+    app(Settings::class)->flush();
 
     $props = portalProps('/portal');
 
@@ -256,8 +258,8 @@ it('AC-DEL-02 keeps balance, history and documents visible during Management Rev
 it('replaces the pay action with a way to reach a person', function () {
     chargeBothPayers();
     $this->lease->forceFill(['delinquency_state' => 'management_review'])->save();
-    app(App\Support\Settings::class)->set('company.phone', '(404) 555-0142');
-    app(App\Support\Settings::class)->flush();
+    app(Settings::class)->set('company.phone', '(404) 555-0142');
+    app(Settings::class)->flush();
 
     $props = portalProps('/portal');
 
@@ -281,7 +283,7 @@ it('hides the pay action rather than render a balance it cannot compute', functi
     // The database will not hold a malformed DECIMAL, so the realistic shape of
     // this is the calculator itself failing — a dropped connection mid-request,
     // or a row Money refuses after an import.
-    $this->mock(App\Domain\Ledger\BalanceCalculator::class, function ($mock) {
+    $this->mock(BalanceCalculator::class, function ($mock) {
         $mock->shouldReceive('tenantBalance')->andThrow(new RuntimeException('ledger unreadable'));
         $mock->shouldReceive('pendingPayments')->andThrow(new RuntimeException('ledger unreadable'));
     });

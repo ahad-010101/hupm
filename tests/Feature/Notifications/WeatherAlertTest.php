@@ -9,11 +9,14 @@ use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\WeatherAlert;
+use App\Support\AuditLogger;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 
 /*
 |--------------------------------------------------------------------------
@@ -142,7 +145,7 @@ it('deduplicates on the constraint rather than on a check', function () {
     ]);
 
     expect(fn () => $duplicate->save())
-        ->toThrow(Illuminate\Database\UniqueConstraintViolationException::class);
+        ->toThrow(UniqueConstraintViolationException::class);
 });
 
 it('alerts the same property again for a genuinely different event', function () {
@@ -245,7 +248,7 @@ it('records a failed poll as a completed run, not a crashed one', function () {
 
     app(PollWeatherAlerts::class)->handle(
         app(WeatherAlertService::class),
-        app(App\Support\AuditLogger::class),
+        app(AuditLogger::class),
     );
 
     // A weather API being down is a normal Tuesday. Failing the job would put
@@ -344,7 +347,7 @@ it('puts a live alert on the tenant dashboard and leaves an expired one off', fu
     $expired = new WeatherAlert;
     $expired->forceFill([
         'property_id' => $this->property->id,
-        'nws_alert_id' => 'manual:'.Illuminate\Support\Str::uuid(),
+        'nws_alert_id' => 'manual:'.Str::uuid(),
         'event_type' => 'Old storm',
         'headline' => 'Last week.',
         'expires_at' => now()->subDay(),
@@ -355,7 +358,9 @@ it('puts a live alert on the tenant dashboard and leaves an expired one off', fu
 
     $props = [];
     $this->actingAs($user)->get('/portal')->assertOk()
-        ->assertInertia(function ($page) use (&$props) { $props = $page->toArray()['props']; });
+        ->assertInertia(function ($page) use (&$props) {
+            $props = $page->toArray()['props'];
+        });
 
     // A storm warning that ended yesterday is worse than no warning: it teaches
     // people to ignore the panel.

@@ -2,6 +2,7 @@
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 
 /*
 |--------------------------------------------------------------------------
@@ -36,7 +37,7 @@ beforeEach(function () {
 });
 
 /** Build a request signed the way Svix signs it. */
-function signedPost(array $payload, ?string $secret = WEBHOOK_SECRET, ?int $timestamp = null): \Illuminate\Testing\TestResponse
+function signedPost(array $payload, ?string $secret = WEBHOOK_SECRET, ?int $timestamp = null): TestResponse
 {
     $body = json_encode($payload);
     $id = 'msg_2abc';

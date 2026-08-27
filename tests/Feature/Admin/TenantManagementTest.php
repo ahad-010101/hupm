@@ -3,6 +3,7 @@
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -154,7 +155,7 @@ it('refuses to archive a tenant with an active lease', function () {
 });
 
 it('shows the whole seeded roster and flags who cannot be emailed', function () {
-    $this->seed(Database\Seeders\DemoDataSeeder::class);
+    $this->seed(DemoDataSeeder::class);
 
     $this->actingAs($this->admin)
         ->get('/admin/tenants')

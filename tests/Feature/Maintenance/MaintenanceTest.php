@@ -3,6 +3,7 @@
 use App\Domain\Maintenance\MaintenanceService;
 use App\Domain\Maintenance\TicketStateMachine;
 use App\Domain\Notifications\NotificationTemplate;
+use App\Exceptions\ImmutableRecordException;
 use App\Models\Lease;
 use App\Models\MaintenanceAttachment;
 use App\Models\MaintenanceEvent;
@@ -12,6 +13,7 @@ use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Vendor;
+use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -260,13 +262,13 @@ it('AC-MNT-05 writes an immutable event with actor and timestamp on every move',
     // Append-only, like the ledger and for the same reason: the history of a
     // repair is evidence. Two layers, and mass assignment is the outer one.
     expect(fn () => $event->update(['note' => 'Something else']))
-        ->toThrow(Illuminate\Database\Eloquent\MassAssignmentException::class);
+        ->toThrow(MassAssignmentException::class);
 
     expect(fn () => $event->forceFill(['note' => 'Something else'])->save())
-        ->toThrow(App\Exceptions\ImmutableRecordException::class);
+        ->toThrow(ImmutableRecordException::class);
 
     expect(fn () => $event->delete())
-        ->toThrow(App\Exceptions\ImmutableRecordException::class);
+        ->toThrow(ImmutableRecordException::class);
 });
 
 /*

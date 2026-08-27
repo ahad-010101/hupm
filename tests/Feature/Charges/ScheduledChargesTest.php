@@ -8,8 +8,11 @@ use App\Models\Lease;
 use App\Models\LedgerEntry;
 use App\Models\Tenant;
 use App\Models\Unit;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use App\Support\AuditLogger;
+use App\Support\BusinessCalendar;
+use App\Support\Settings;
 use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -148,8 +151,8 @@ it('GATE Q-10 charges a full month when proration is set to none', function () {
     // The convention is unanswered. Shipping `daily` as a default is a guess,
     // so the alternative has to actually work rather than be a settings row
     // nobody wired up.
-    app(App\Support\Settings::class)->set('charges.proration_method', 'none');
-    app(App\Support\Settings::class)->flush();
+    app(Settings::class)->set('charges.proration_method', 'none');
+    app(Settings::class)->flush();
 
     $lease = makeLease(['start_date' => '2026-01-15']);
     postAt($lease, '2026-01-15');
@@ -277,7 +280,7 @@ it('leaves no partial state when a lease fails mid-period', function () {
     // finished. A half-posted period is worse than a missed one: the next run
     // would see the period as handled and never complete it.
     $this->app->bind(NotificationService::class, function () {
-        return new class(app(App\Support\AuditLogger::class)) extends NotificationService
+        return new class(app(AuditLogger::class)) extends NotificationService
         {
             public function __construct(private $unused) {}
 
@@ -330,8 +333,8 @@ it('TDD §8 keeps one bad lease from stopping the others', function () {
 
     app(PostScheduledCharges::class)->handle(
         app(ChargePostingService::class),
-        app(App\Support\BusinessCalendar::class),
-        app(App\Support\AuditLogger::class),
+        app(BusinessCalendar::class),
+        app(AuditLogger::class),
     );
 
     // The healthy lease still got its rent.
@@ -349,8 +352,8 @@ it('records a job run so a silent cron failure is detectable', function () {
 
     app(PostScheduledCharges::class)->handle(
         app(ChargePostingService::class),
-        app(App\Support\BusinessCalendar::class),
-        app(App\Support\AuditLogger::class),
+        app(BusinessCalendar::class),
+        app(AuditLogger::class),
     );
 
     $run = DB::table('job_runs')->first();

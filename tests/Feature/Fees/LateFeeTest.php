@@ -11,10 +11,14 @@ use App\Models\LedgerEntry;
 use App\Models\Payment;
 use App\Models\Tenant;
 use App\Models\Unit;
+use App\Support\AuditLogger;
+use App\Support\BusinessCalendar;
 use App\Support\Money;
 use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -109,7 +113,7 @@ function postFeesOn(Lease $lease, string $date): int
     return test()->fees->postFor($lease, CarbonImmutable::parse($date));
 }
 
-function feeRows(): \Illuminate\Support\Collection
+function feeRows(): Collection
 {
     return LedgerEntry::where('category', 'late_fee')->orderBy('id')->get();
 }
@@ -364,8 +368,8 @@ it('records the skipped run rather than looking like a broken cron', function ()
 
     app(PostLateFees::class)->handle(
         app(LateFeeService::class),
-        app(App\Support\BusinessCalendar::class),
-        app(App\Support\AuditLogger::class),
+        app(BusinessCalendar::class),
+        app(AuditLogger::class),
     );
 
     // "Switched off" and "cron is broken" are different facts and must not look
@@ -437,16 +441,16 @@ it('runs the whole portfolio and keeps going past one bad lease', function () {
     chargeRent($second, 'tenant', '500.00', '2026-02');
 
     CarbonImmutable::setTestNow('2026-02-20 12:00:00');
-    Illuminate\Support\Carbon::setTestNow('2026-02-20 12:00:00');
+    Carbon::setTestNow('2026-02-20 12:00:00');
 
     $posted = app(PostLateFees::class)->handle(
         app(LateFeeService::class),
-        app(App\Support\BusinessCalendar::class),
-        app(App\Support\AuditLogger::class),
+        app(BusinessCalendar::class),
+        app(AuditLogger::class),
     );
 
     CarbonImmutable::setTestNow();
-    Illuminate\Support\Carbon::setTestNow();
+    Carbon::setTestNow();
 
     expect($posted)->toBe(2)
         ->and(DB::table('job_runs')->where('job_name', PostLateFees::class)->value('records_processed'))->toBe(2);

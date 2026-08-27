@@ -15,6 +15,7 @@ use App\Support\BusinessCalendar;
 use App\Support\Money;
 use App\Support\Settings;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -471,7 +472,7 @@ class ReconciliationService
         return $stale->count();
     }
 
-    /** @return \Illuminate\Support\Collection<int, Payment> */
+    /** @return Collection<int, Payment> */
     private function flaggedPayments()
     {
         return Payment::query()

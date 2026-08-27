@@ -4,6 +4,8 @@ use App\Models\Property;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use Database\Seeders\DemoDataSeeder;
+use Database\Seeders\TestAddressSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -17,7 +19,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     // Country/state/city are validated against the reference tables (D-19).
-    $this->seed(Database\Seeders\TestAddressSeeder::class);
+    $this->seed(TestAddressSeeder::class);
     $this->admin = User::factory()->admin()->create();
 });
 
@@ -202,7 +204,7 @@ it('404s when a unit is addressed through the wrong property', function () {
 });
 
 it('lists the whole seeded portfolio', function () {
-    $this->seed(Database\Seeders\DemoDataSeeder::class);
+    $this->seed(DemoDataSeeder::class);
 
     $this->actingAs($this->admin)
         ->get('/admin/properties')
