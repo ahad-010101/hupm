@@ -163,7 +163,13 @@ it('shows the listings the office has written, one per line', function () {
 
     $response->assertSee('2 bed, Decatur', escape: false);
     $response->assertSee('3 bed, East Point', escape: false);
-    expect(substr_count($response->getContent(), '<li class="rounded-xl'))->toBe(2);
+    //
+    // Counted inside the list's own element rather than by matching a class
+    // prefix: styling moves, and a test that breaks every time somebody adds a
+    // hover effect is a test people learn to edit rather than read.
+    preg_match('#<ul aria-label="Available properties".*?</ul>#s', $response->getContent(), $list);
+
+    expect(substr_count($list[0] ?? '', '<li'))->toBe(2);
 });
 
 it('points at the state’s own material rather than our reading of it', function () {

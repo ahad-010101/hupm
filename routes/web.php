@@ -20,6 +20,7 @@ use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\SignatureController as AdminSignatureController;
 use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
+use App\Http\Controllers\Admin\VendorController;
 use App\Http\Controllers\Admin\WeatherAlertController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\Portal\DashboardController;
@@ -141,6 +142,21 @@ Route::middleware('auth')->group(function () {
         // `reports/{report}` cannot swallow `reports/rent-roll/export`.
         Route::get('reports/{report}/export', [ReportController::class, 'export'])->name('reports.export');
         Route::get('reports/{report?}', [ReportController::class, 'index'])->name('reports.index');
+
+        /*
+         | Contractors (API-ADM-38). The list the maintenance screen assigns
+         | from — without it that dropdown is permanently empty.
+         |
+         | No `show` and no `create`: the whole thing is one screen with an
+         | inline form, because a contractor is six fields and a page of its
+         | own for six fields is a page nobody wants to visit.
+         */
+        Route::get('vendors', [VendorController::class, 'index'])->name('vendors.index');
+        Route::post('vendors', [VendorController::class, 'store'])->name('vendors.store');
+        Route::patch('vendors/{vendor}', [VendorController::class, 'update'])
+            ->whereNumber('vendor')->name('vendors.update');
+        Route::delete('vendors/{vendor}', [VendorController::class, 'destroy'])
+            ->whereNumber('vendor')->name('vendors.destroy');
 
         /*
          | The public site (WP-36, D-27).

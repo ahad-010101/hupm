@@ -8,6 +8,7 @@ use App\Support\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -20,6 +21,10 @@ class AuthenticatedSessionController extends Controller
     {
         return Inertia::render('Auth/Login', [
             'status' => $request->session()->get('status'),
+            // Never passed before, so the "Forgot your password?" link has been
+            // rendering nowhere since the scaffolding was generated — the route
+            // exists and works, but nothing on the login page reached it.
+            'canResetPassword' => Route::has('password.request'),
         ]);
     }
 

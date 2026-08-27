@@ -1,3 +1,164 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+|--------------------------------------------------------------------------
+| Motion  [WP-36, D-05]
+|--------------------------------------------------------------------------
+|
+| The public site loads no JavaScript, so every bit of movement here is CSS.
+| That is a constraint and also the right answer: nothing below can delay a
+| page, block a paint, or fail to load.
+|
+| Three rules, and the first one is not negotiable.
+|
+| 1. **Motion may never be what makes content visible.** Every animated element
+|    is fully visible with no CSS animation at all — the hiding half only exists
+|    inside `@media (prefers-reduced-motion: no-preference)`, and the scroll
+|    reveal additionally inside `@supports (animation-timeline: view())`. A
+|    browser that does not animate simply shows the page. Get this backwards and
+|    an unsupported browser renders a blank page with the words technically
+|    present, which on this particular site could be somebody who cannot find
+|    the emergency number.
+|
+| 2. **Reduced motion means none.** Not "less". The media query is an opt-in
+|    everywhere below, and the reduce block at the end switches off transitions
+|    the utilities added too. Vestibular disorders are common and the setting is
+|    a request, not a preference.
+|
+| 3. **Calm.** Under half a second, under fifteen pixels, no bounce, no loop, no
+|    parallax. The reader is Denise from PRD §7 — 58, on an Android phone, often
+|    in a hurry. Motion should make the page feel settled, not busy.
+|
+| The Emergency Maintenance page is deliberately absent from all of this: it is
+| its own Blade file, uses none of these classes, and paints instantly. Somebody
+| opens it standing in water.
+|
+*/
+
+/*
+ | These live outside `@layer`, deliberately.
+ |
+ | Tailwind only purges what is inside a layer, so a plain rule here is always
+ | in the built CSS. That is what makes `hupm-reveal-{{ $index }}` safe in a
+ | Blade template — the same interpolation would silently produce a class that
+ | does not exist if these were Tailwind utilities, which is a bug this project
+ | has already been bitten by once. Do not move them into a layer.
+ */
+
+@keyframes hupm-rise {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    /*
+     | The first thing on a page, animated on load.
+     |
+     | Used sparingly — the hero only. A page where everything arrives is a page
+     | that arrives slowly.
+     */
+    .hupm-enter {
+        animation: hupm-rise 480ms cubic-bezier(0.22, 0.7, 0.3, 1) both;
+    }
+
+    .hupm-enter-1 { animation-delay: 60ms; }
+    .hupm-enter-2 { animation-delay: 120ms; }
+    .hupm-enter-3 { animation-delay: 180ms; }
+
+    /*
+     | Everything below the fold, revealed as it scrolls in.
+     |
+     | Scroll-driven CSS animation — no scroll listener, no observer, no script.
+     | Chrome and Edge run it today; Firefox and Safari show the content
+     | immediately, which is a perfectly good outcome rather than a fallback to
+     | apologise for.
+     */
+    @supports (animation-timeline: view()) {
+        .hupm-reveal {
+            animation: hupm-rise 520ms cubic-bezier(0.22, 0.7, 0.3, 1) both;
+            animation-timeline: view();
+
+            /* Finish well before the element is centred, so it is settled by the
+               time it is being read rather than still moving under the eye. */
+            animation-range: entry 0% cover 24%;
+        }
+
+        /* A grid of cards arrives in sequence rather than as a block. Small
+           steps: at 90ms the last card is a quarter-second behind the first,
+           which reads as one movement instead of four. */
+        .hupm-reveal-1 { animation-delay: 0ms; }
+        .hupm-reveal-2 { animation-delay: 90ms; }
+        .hupm-reveal-3 { animation-delay: 180ms; }
+        .hupm-reveal-4 { animation-delay: 270ms; }
+    }
+
+    /*
+     | Hover and focus.
+     |
+     | `transform` and `box-shadow` only — both composite on the GPU and neither
+     | reflows the page. Animating anything that changes layout on hover makes a
+     | list of cards shudder as the pointer crosses it.
+     */
+    .hupm-lift {
+        transition:
+            transform 200ms cubic-bezier(0.22, 0.7, 0.3, 1),
+            box-shadow 200ms cubic-bezier(0.22, 0.7, 0.3, 1),
+            border-color 200ms ease;
+    }
+
+    .hupm-lift:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px -12px rgb(15 100 89 / 0.25);
+    }
+
+    /* Focus gets the same acknowledgement as hover. A keyboard user should not
+       be the only one who cannot tell the card is interactive. */
+    .hupm-lift:focus-within {
+        transform: translateY(-2px);
+    }
+
+    .hupm-nudge {
+        transition: transform 180ms cubic-bezier(0.22, 0.7, 0.3, 1);
+    }
+
+    .hupm-nudge:hover,
+    .hupm-nudge:focus-visible {
+        transform: translateY(-1px);
+    }
+
+    /* The FAQ marker. `<details>` has no animatable open state, so the one
+       thing that can move is the sign. */
+    .hupm-marker {
+        transition: transform 220ms cubic-bezier(0.22, 0.7, 0.3, 1);
+    }
+
+    details[open] > summary .hupm-marker {
+        transform: rotate(45deg);
+    }
+}
+
+/*
+ | Asked for no motion, given no motion.
+ |
+ | Belt and braces: the blocks above are already opt-in, but a Tailwind
+ | `transition-*` utility added to a partial later would slip past them. This
+ | catches those without anybody having to remember.
+ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

@@ -1,7 +1,7 @@
 {{-- Emergency notice. The number is never typed into content — it comes from
      `company.emergency_phone`, so it is right in one place and changing it does
      not mean hunting through pages. --}}
-<section class="my-10">
+<section class="hupm-reveal my-10">
     <div class="rounded-xl border-2 border-overdue-border bg-overdue-bg p-6">
         <p class="text-lg font-semibold text-overdue-fg">
             {{ $s['heading'] ?? 'Is this an emergency?' }}

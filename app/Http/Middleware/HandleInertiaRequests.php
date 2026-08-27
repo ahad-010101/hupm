@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Domain\Reporting\ExceptionFeed;
 use App\Support\ReconciliationHealth;
+use App\Support\Settings;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -44,6 +45,23 @@ class HandleInertiaRequests extends Middleware
                     'email' => $request->user()->email,
                     'role' => $request->user()->role,
                 ] : null,
+            ],
+
+            /*
+             | Company details, for the pages a signed-out person sees.
+             |
+             | The login and password screens are the door between the public
+             | site and the portal, and they should not look like a different
+             | product. The emergency number belongs there too: somebody in
+             | trouble may well try to sign in before they think to look for it.
+             |
+             | Cheap — Settings is a cached singleton, so this is an array
+             | lookup after the first request.
+            */
+            'company' => fn () => [
+                'name' => app(Settings::class)->string('company.name', config('app.name')),
+                'phone' => app(Settings::class)->string('company.phone'),
+                'emergency_phone' => app(Settings::class)->string('company.emergency_phone'),
             ],
 
             // One-shot messages after a redirect. Split by tone so a page never

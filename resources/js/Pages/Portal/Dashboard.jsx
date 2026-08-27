@@ -88,9 +88,14 @@ export default function Dashboard({
             {weatherAlerts.map((alert) => (
                 <Alert key={alert.id} tone="warning" className="mb-4" title={alert.event}>
                     {alert.headline}{' '}
-                    <Link href="/emergency-maintenance" className="underline">
+                    {/* A plain <a>, not Inertia's Link. The public site is Blade
+                        and its route group carries no Inertia middleware, so an
+                        Inertia visit gets plain HTML back and renders it in an
+                        error overlay instead of navigating — on the one link a
+                        resident may be following in an emergency. */}
+                    <a href="/emergency-maintenance" className="underline">
                         Emergency maintenance instructions
-                    </Link>
+                    </a>
                 </Alert>
             ))}
 

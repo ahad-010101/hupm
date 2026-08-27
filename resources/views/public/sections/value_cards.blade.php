@@ -1,5 +1,5 @@
 {{-- Cards. Two to four, equal weight, no ordering implied. --}}
-<section class="py-12 sm:py-16">
+<section class="hupm-reveal py-12 sm:py-16">
     @if ($s['heading'] ?? '')
         <h2 class="text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl">{{ $s['heading'] }}</h2>
     @endif
@@ -24,8 +24,8 @@
 
     @if ($items)
         <div class="mt-8 grid gap-5 {{ $columns }}">
-            @foreach ($items as $item)
-                <div class="rounded-xl border border-gray-200 bg-white p-6">
+            @foreach ($items as $index => $item)
+                <div class="hupm-reveal hupm-reveal-{{ min($index + 1, 4) }} hupm-lift rounded-xl border border-gray-200 bg-white p-6">
                     <p class="text-lg font-semibold text-gray-900">{{ $item['title'] ?? '' }}</p>
                     <p class="mt-2 leading-relaxed text-gray-700">{{ $item['body'] ?? '' }}</p>
                 </div>

@@ -1,6 +1,6 @@
 {{-- Questions. Native <details>, so they open and close with JavaScript
      switched off — which on the public site is every time (D-05). --}}
-<section class="border-t border-gray-200 py-12 sm:py-16">
+<section class="hupm-reveal border-t border-gray-200 py-12 sm:py-16">
     @if ($s['heading'] ?? '')
         <h2 class="text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl">{{ $s['heading'] }}</h2>
     @endif
@@ -13,7 +13,7 @@
                     {{-- Rotates on open. Marked aria-hidden: the disclosure
                          state is already announced by <details> itself, and a
                          screen reader does not need the glyph too. --}}
-                    <span aria-hidden="true" class="text-2xl leading-none text-brand-700 transition group-open:rotate-45">+</span>
+                    <span aria-hidden="true" class="hupm-marker text-2xl leading-none text-brand-700">+</span>
                 </summary>
                 <p class="mt-3 max-w-prose leading-relaxed text-gray-700">{{ $item['answer'] ?? '' }}</p>
             </details>

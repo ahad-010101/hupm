@@ -3,7 +3,7 @@
      Admin-typed lines, never a query over vacant units. A public list of empty
      homes is a public statement about who is not at home, which is exactly what
      BR-22 forbids — so nothing here reaches a tenant table. --}}
-<section class="py-12 sm:py-16">
+<section class="hupm-reveal py-12 sm:py-16">
     @if ($s['heading'] ?? '')
         <h2 class="text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl">{{ $s['heading'] }}</h2>
     @endif
@@ -17,9 +17,9 @@
             <p class="mt-3 max-w-prose text-lg text-gray-700">{{ $s['intro'] }}</p>
         @endif
 
-        <ul class="mt-8 grid gap-4 sm:grid-cols-2">
+        <ul aria-label="Available properties" class="mt-8 grid gap-4 sm:grid-cols-2">
             @foreach ($entries as $entry)
-                <li class="rounded-xl border border-gray-200 bg-white p-5 text-gray-800">{{ $entry }}</li>
+                <li class="hupm-lift rounded-xl border border-gray-200 bg-white p-5 text-gray-800">{{ $entry }}</li>
             @endforeach
         </ul>
     @else

@@ -1,6 +1,6 @@
 {{-- Steps. Numbered because the order carries information — see UI §9 on
      structure that encodes something true rather than decorating. --}}
-<section class="border-t border-gray-200 py-12 sm:py-16">
+<section class="hupm-reveal border-t border-gray-200 py-12 sm:py-16">
     @if ($s['heading'] ?? '')
         <h2 class="text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl">{{ $s['heading'] }}</h2>
     @endif
@@ -11,7 +11,7 @@
 
     <ol class="mt-8 grid gap-6 sm:grid-cols-2">
         @foreach ($s['items'] ?? [] as $index => $item)
-            <li class="flex gap-4">
+            <li class="hupm-reveal hupm-reveal-{{ min($index + 1, 4) }} flex gap-4">
                 <span aria-hidden="true"
                       class="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-brand-50 text-base font-semibold text-brand-700">
                     {{ $index + 1 }}
