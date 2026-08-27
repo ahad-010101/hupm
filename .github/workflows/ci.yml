@@ -1,13 +1,16 @@
 name: CI
 
-# Every push and every pull request. This is the gate the deploy workflow
-# waits on — nothing reaches HostGator that has not been through it.
+# MANUAL ONLY. [decision 2026-08-27]
+#
+# This does not run on push, on pull request, or as part of a deploy. Nothing
+# runs it but you: Actions -> CI -> Run workflow.
+#
+# It is kept because the suite is worth having somewhere it can run against
+# MySQL 8 on a clean machine — which is the only place the full run has ever
+# been exercised end to end.
 
 on:
-  push:
-    branches: [main, 'wp/**']
-  pull_request:
-  workflow_call:
+  workflow_dispatch:
 
 jobs:
   test:

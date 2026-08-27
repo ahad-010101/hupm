@@ -212,8 +212,10 @@ curl -sI https://headsuppm.com/ | grep -i -E 'strict|x-|referrer|content-securit
 curl -s -o /dev/null -w '%{http_code}\n' https://headsuppm.com/.env
 ```
 
-That last one must not print `200`. And `ci.yml` still runs on every push — check that
-run is green for the commit you are shipping.
+That last one must not print `200`.
+
+`ci.yml` no longer runs on push either. It is manual: **Actions -> CI -> Run workflow**,
+whenever you want the suite run against MySQL 8 on a clean machine.
 
 ---
 
