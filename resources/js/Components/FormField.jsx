@@ -67,12 +67,6 @@ export default function FormField({
                 )}
             </label>
 
-            {hint && (
-                <p id={hintId} className="mb-1 text-sm text-gray-600">
-                    {hint}
-                </p>
-            )}
-
             {control ?? (
                 <input
                     id={id}
@@ -89,6 +83,24 @@ export default function FormField({
                     }`}
                     {...props}
                 />
+            )}
+
+            {/*
+                The hint sits BELOW the control, not between the label and it.
+                Two fields side by side where only one has a hint would otherwise
+                have their inputs at different heights — the hint pushes one down
+                and the row stops lining up. Every paired row in the console had
+                this.
+
+                Nothing is lost by moving it: `aria-describedby` above wires the
+                hint to the control regardless of visual order, so a screen
+                reader still reads it when the field takes focus, which is before
+                anybody types either way.
+            */}
+            {hint && (
+                <p id={hintId} className="mt-1 text-sm text-gray-600">
+                    {hint}
+                </p>
             )}
 
             {/* Present in the DOM even when empty so assistive tech has a live
