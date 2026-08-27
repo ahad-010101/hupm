@@ -532,7 +532,25 @@ class AuthorizeNetGateway
             $text = str_ireplace([$secret, htmlspecialchars($secret, ENT_QUOTES)], '[redacted]', $text);
         }
 
-        return mb_substr($text, 0, 300);
+        /*
+         | And any long run of digits.  [I-5]
+         |
+         | Our own credentials are handled above. This is for the ones that are
+         | not ours: Authorize.Net quotes the values it objected to, so a
+         | rejected debit can come back as "unsuccessful for account 900012345678
+         | routing 061000052" — and that sentence was going straight into a log
+         | file kept for a fortnight on shared hosting. Found by the WP-31 sweep,
+         | reading what had actually been written rather than the call sites.
+         |
+         | I-5 admits no exception, so this is deliberately blunt. Seven digits
+         | is short enough to catch a routing number and every account number
+         | shape, and it does cost us the transaction id when one appears inside
+         | a message — that id is logged as its own field elsewhere, where it can
+         | be read without a bank account beside it.
+        */
+        $text = preg_replace('/\d{7,}/', '[redacted]', $text);
+
+        return mb_substr((string) $text, 0, 300);
     }
 
     /** @return array<string, mixed> */

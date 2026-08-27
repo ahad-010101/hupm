@@ -83,14 +83,6 @@ beforeEach(function () {
     $this->actingAs($this->user);
 });
 
-/** One Authorize.Net JSON body, BOM and all. */
-function anetBody(array $payload): string
-{
-    return "\xEF\xBB\xBF".json_encode(array_merge([
-        'messages' => ['resultCode' => 'Ok', 'message' => [['code' => 'I00001', 'text' => 'Successful.']]],
-    ], $payload));
-}
-
 function payPayload(array $overrides = []): array
 {
     return array_merge([

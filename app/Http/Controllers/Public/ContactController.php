@@ -75,10 +75,11 @@ class ContactController extends Controller
             submittedAt: $this->calendar->now()->format('j F Y, g:ia'),
         ));
 
-        // The message itself is never logged: it is a stranger's words, and it
-        // may carry an address or a phone number that has no business sitting
-        // in a log file for fourteen days.
-        Log::info('Public contact form submitted.', ['subject' => $data['subject']]);
+        // Nothing of what they wrote reaches the log — not the message and not
+        // the subject, which is free text somebody may well have put their own
+        // name and telephone number into. The email is the record; a log line
+        // retained for a fortnight is not the place for a stranger's details.
+        Log::info('Public contact form submitted.');
 
         // Named route rather than back(): back() follows the Referer header,
         // and a browser or privacy extension that strips it would land the

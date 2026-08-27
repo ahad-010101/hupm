@@ -128,14 +128,6 @@ beforeEach(function () {
     });
 });
 
-/** The Authorize.Net envelope, BOM and all. */
-function anetBody(array $payload): string
-{
-    return "\xEF\xBB\xBF".json_encode(array_merge([
-        'messages' => ['resultCode' => 'Ok', 'message' => [['code' => 'I00001', 'text' => 'Successful.']]],
-    ], $payload), JSON_THROW_ON_ERROR);
-}
-
 /** A submitted-but-not-settled eCheck, exactly as the portal leaves one. */
 function submittedEcheck(string $amount, string $transactionId): Payment
 {

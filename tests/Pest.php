@@ -1,5 +1,8 @@
 <?php
 
+use App\Support\BusinessCalendar;
+use Tests\TestCase;
+
 /*
 |--------------------------------------------------------------------------
 | Test Case
@@ -11,14 +14,14 @@
 |
 */
 
-pest()->extend(Tests\TestCase::class)
+pest()->extend(TestCase::class)
  // ->use(Illuminate\Foundation\Testing\RefreshDatabase::class)
     ->in('Feature');
 
 // Architecture tests need the application booted too: the schema guarantees in
 // SchemaTest query the live database through the DB facade. Tests that only
 // touch the filesystem (CaseSensitivityTest) are unaffected by this.
-pest()->extend(Tests\TestCase::class)->in('Architecture');
+pest()->extend(TestCase::class)->in('Architecture');
 
 /*
 |--------------------------------------------------------------------------
@@ -62,5 +65,24 @@ function something()
  */
 function businessToday(): string
 {
-    return app(App\Support\BusinessCalendar::class)->today()->toDateString();
+    return app(BusinessCalendar::class)->today()->toDateString();
+}
+
+/**
+ * One Authorize.Net JSON body, BOM and all.
+ *
+ * Lives here rather than in a test file because two of them need it, and a
+ * Pest helper is a plain global function: declaring it twice is a fatal
+ * redeclaration the moment both files load in one process. That does not show
+ * up when you run either file on its own -- only in the full suite.
+ *
+ * The BOM is the point. Authorize.Net prefixes every response with one and
+ * `AuthorizeNetGateway::decode()` strips it, so a fake without one exercises a
+ * response shape the gateway never actually receives.
+ */
+function anetBody(array $payload): string
+{
+    return "\xEF\xBB\xBF".json_encode(array_merge([
+        'messages' => ['resultCode' => 'Ok', 'message' => [['code' => 'I00001', 'text' => 'Successful.']]],
+    ], $payload), JSON_THROW_ON_ERROR);
 }
