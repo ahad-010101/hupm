@@ -1,30 +1,39 @@
 name: Deploy to HostGator
 
-# MANUAL ONLY, and deliberately so.
+# HUPM -> https://headsuppm.com, over SSH on port 2222.
 #
-# This system moves rent. Ledger rows are immutable (I-3), corrections are
-# reversing entries, and a migration that runs because somebody merged a README
-# change is not a trade this project should make. Deploying is an act somebody
-# performs, at a time they chose, watching the output.
+# ARCHITECTURE (see deploy/hostgator-setup.sh for the one-time bootstrap):
 #
-# The `production` environment below adds a second gate: configure it in
-# Settings → Environments with a required reviewer, and the job waits for an
-# approval before it touches anything.
+#   /home5/jabrilgino/
+#   ├── hupm -> releases/<id>            symlink, swapped atomically
+#   ├── releases/<id>/
+#   │   ├── app/ bootstrap/ config/ ... vendor/ artisan
+#   │   ├── .env    -> ../../shared/.env
+#   │   ├── storage -> ../../shared/storage
+#   │   └── public  -> ../../public_html/website_0f94b77e
+#   ├── shared/{.env,storage}            outlive every release
+#   └── public_html/website_0f94b77e/    cPanel Document Root (a real directory)
 #
-# Everything host-specific is a secret or a variable, because none of it is
-# known until WP-00H has been run against the real account:
+# WHY public/ IS A SYMLINK, not a copy. Laravel's public_path() is
+# base_path('public'). With the app in ~/hupm and the docroot elsewhere, it
+# would resolve to a directory nothing serves — and Vite::manifest() reads
+# public_path('build/manifest.json'), so @vite would throw and EVERY page would
+# 500. Symlinking makes public_path() land on the served directory with no code
+# change. Overriding it in bootstrap/app.php is not an option: that file runs
+# before .env is loaded, and once config:cache exists Laravel skips
+# LoadEnvironmentVariables entirely, so env() there returns null in production.
 #
-#   Secrets    SSH_PRIVATE_KEY   deploy key, no passphrase
-#              SSH_KNOWN_HOSTS   `ssh-keyscan -p <port> <host>` output
-#              SSH_HOST  SSH_USER
-#              HEALTH_TOKEN      to read /health's detail after deploying
-#   Variables  SSH_PORT          HostGator shared is commonly 2222, not 22
-#              DEPLOY_PATH       e.g. /home/cpaneluser/hupm
-#              PHP_CLI_PATH      e.g. /opt/cpanel/ea-php82/root/usr/bin/php
-#                                — NEVER bare `php`; the wrong path is the
-#                                  single most common shared-hosting failure
-#                                  and it fails silently (R-5)
-#              APP_URL           e.g. https://hupm.example.com
+# WHY THE DOCROOT IS NOT A SYMLINK. cPanel owns it and may recreate it, and
+# Apache FollowSymLinks is not guaranteed on shared hosting. Assets are copied
+# in BEFORE the release symlink swaps; hashed filenames mean the old and new
+# builds coexist safely for that window.
+#
+# WHY tar AND NOT rsync. rsync is not guaranteed present on HostGator, and
+# vendor/ is ~8,000 files where per-file SSH overhead dominates. One gzipped
+# tarball needs only tar, which always exists.
+#
+# WHY MANUAL. This system moves rent, and ledger rows are immutable (I-3). A
+# migration must never run because somebody merged a README change.
 
 on:
   workflow_dispatch:
@@ -33,171 +42,368 @@ on:
         description: 'Run database migrations'
         type: boolean
         default: true
-      skip_tests:
-        description: 'Skip CI (emergency rollback only)'
+      tolerate_degraded_health:
+        description: 'Accept a 503 from /health (needed on the FIRST deploy, before cron has ever run)'
+        type: boolean
+        default: false
+      skip_ci:
+        description: 'Skip the test suite (emergency rollback only)'
         type: boolean
         default: false
 
 concurrency:
-  # Two deploys rsyncing the same tree at once is a corrupted install. Queue,
-  # never cancel: a half-finished rsync that gets cancelled is the worst state.
+  # Queue, never cancel. Two deploys extracting into the same tree is a
+  # corrupted install, and a cancelled half-extraction is the worst state of all.
   group: deploy-production
   cancel-in-progress: false
 
+env:
+  DOCROOT: /home5/jabrilgino/public_html/website_0f94b77e
+
 jobs:
   ci:
-    if: ${{ !inputs.skip_tests }}
+    if: ${{ !inputs.skip_ci }}
     uses: ./.github/workflows/ci.yml
 
   deploy:
     needs: [ci]
-    # `always()` plus the explicit result check, so skip_tests can bypass CI
-    # without the job being skipped along with it.
-    if: ${{ always() && (inputs.skip_tests || needs.ci.result == 'success') }}
+    # always() + the explicit result check, so skip_ci can bypass CI without
+    # this job being skipped alongside it.
+    if: ${{ always() && (inputs.skip_ci || needs.ci.result == 'success') }}
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: PHP 8.2
+      # 8.3 to match the server's 8.3.33, not composer.json's 8.2 floor.
+      # --optimize-autoloader writes a platform_check.php from the building
+      # PHP; building on a lower version than the host runs is fine, building
+      # on a HIGHER one aborts every request with a platform check failure.
+      - name: PHP 8.3
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.3'
           extensions: bcmath, ctype, curl, fileinfo, gd, intl, mbstring, openssl, pdo_mysql, tokenizer, xml, zip
           coverage: none
+          tools: composer:v2
+
+      - name: Composer cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-prod-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-prod-
+
+      # Composer is NOT installed on HostGator, so vendor/ is built here and
+      # shipped. --no-dev drops PHPUnit, Pest, Faker and friends: roughly half
+      # the tree, and none of it should exist on a production host anyway.
+      - name: Install PHP dependencies (production)
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-progress
+
+      - name: Detect a front end
+        id: frontend
+        run: |
+          if [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v4
+        if: steps.frontend.outputs.present == 'true'
         with:
           node-version-file: .nvmrc
           cache: npm
 
-      # Production dependency tree: no dev packages on the host, and the
-      # classmap optimised because there is no opcache preloading to lean on.
-      - name: Install PHP dependencies (production)
-        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-progress
-
-      # [D-14] Built here, every time. public/build is gitignored — committing
-      # hashed filenames makes every branch conflict — and there is no Node on
-      # the server. Building in CI is what makes "the deploy forgot the assets"
-      # impossible rather than merely unlikely. That failure is silent: correct
+      # [D-14] public/build is gitignored — committing hashed filenames makes
+      # every branch conflict — and there is no Node on the server. Building
+      # here is what makes "the deploy forgot the assets" impossible rather
+      # than merely unlikely. That failure is silent in the worst way: correct
       # HTML, every route 200, clean logs, and an unstyled column of links.
       - name: Build assets
+        if: steps.frontend.outputs.present == 'true'
         run: |
           npm ci
           npm run build
-          test -f public/build/manifest.json
+          test -f public/build/manifest.json \
+            || { echo "::error::npm run build produced no manifest"; exit 1; }
 
-      # Written by `npm run dev`. If it ever reaches the server, every @vite
-      # call points visitors at localhost:5173 and the site has no CSS at all.
-      - name: Guard against a stale hot file
-        run: rm -f public/hot
+      - name: Validate the application before shipping it
+        run: |
+          # public/hot is written by `npm run dev`. On the server it points
+          # every visitor's browser at localhost:5173, so the site has no CSS
+          # and no JavaScript at all.
+          rm -f public/hot
 
+          # Syntax-check everything that will run on the host. Cheap, and it
+          # catches a bad merge before it reaches production rather than after.
+          find app bootstrap config database routes -name '*.php' -print0 \
+            | xargs -0 -n1 -P4 php -l > /dev/null
+
+          # The .env in the runner (if any) must never travel.
+          rm -f .env .env.backup .env.production
+
+      # ------------------------------------------------------------------
+      # The split document root
+      # ------------------------------------------------------------------
+      - name: Rewrite public/index.php for the split root
+        run: |
+          set -e
+          APP="${{ vars.DEPLOY_PATH }}"
+
+          # index.php ships with paths relative to itself (__DIR__.'/../…').
+          # Served from the cPanel docroot, '..' is ~/public_html — which holds
+          # no Laravel at all. These become absolute paths through the stable
+          # `hupm` symlink, so they stay correct across every release.
+          sed -i \
+            -e "s#__DIR__\.'/\.\./storage/framework/maintenance\.php'#'$APP/storage/framework/maintenance.php'#" \
+            -e "s#__DIR__\.'/\.\./vendor/autoload\.php'#'$APP/vendor/autoload.php'#" \
+            -e "s#__DIR__\.'/\.\./bootstrap/app\.php'#'$APP/bootstrap/app.php'#" \
+            public/index.php
+
+          # Fail loudly if Laravel ever changes the shape of that file, rather
+          # than shipping an index.php that silently still points at '..'.
+          grep -q "$APP/vendor/autoload.php" public/index.php \
+            || { echo "::error::index.php autoload path was not rewritten — check its contents against the sed above"; exit 1; }
+          grep -q "$APP/bootstrap/app.php" public/index.php \
+            || { echo "::error::index.php bootstrap path was not rewritten"; exit 1; }
+
+          echo "Rewrote index.php to load from $APP"
+
+      # ------------------------------------------------------------------
+      # Package
+      # ------------------------------------------------------------------
+      - name: Build the release tarballs
+        id: pack
+        run: |
+          set -e
+          RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          echo "id=$RELEASE" >> "$GITHUB_OUTPUT"
+
+          # The application, WITHOUT public/ — that becomes a symlink to the
+          # docroot on the server — and without anything the server owns.
+          tar -czf app.tar.gz \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./node_modules' \
+            --exclude='./tests' \
+            --exclude='./public' \
+            --exclude='./storage' \
+            --exclude='./.env*' \
+            --exclude='./deploy' \
+            app bootstrap config database resources routes vendor \
+            artisan composer.json composer.lock
+
+          # The public assets, served directly by Apache.
+          tar -czf public.tar.gz -C public .
+
+          ls -lh app.tar.gz public.tar.gz
+
+      # ------------------------------------------------------------------
+      # SSH
+      # ------------------------------------------------------------------
       - name: Authorise SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          # Pinned host key, not StrictHostKeyChecking=no. Disabling the check
-          # to make a deploy work is how a deploy pipeline becomes the thing
-          # that ships to whoever answers on that address.
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Maintenance mode
-        run: |
-          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan down --retry=60" || true
-        # `|| true` for the first deploy only, when there is nothing there yet
-        # to put down.
+          cat > ~/.ssh/config <<EOF
+          Host hostgator
+            HostName ${{ secrets.SSH_HOST }}
+            User ${{ secrets.SSH_USER }}
+            Port ${{ vars.SSH_PORT }}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            ServerAliveInterval 30
+          EOF
+          chmod 600 ~/.ssh/config
+
+          # Fails here rather than halfway through an upload if the key, the
+          # port or the host key is wrong.
+          ssh -o BatchMode=yes hostgator 'echo "SSH OK as $(whoami) on $(hostname)"'
 
       - name: Upload
         run: |
-          rsync -az --delete --checksum \
-            -e "ssh -p ${{ vars.SSH_PORT }}" \
-            --exclude='.env' \
-            --exclude='.git' \
-            --exclude='storage/' \
-            --exclude='node_modules/' \
-            --exclude='tests/' \
-            --exclude='public/hot' \
-            --exclude='.github/' \
-            app bootstrap config database public resources routes vendor \
-            artisan composer.json composer.lock \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ vars.DEPLOY_PATH }}/
-        # --delete so stale hashed assets do not accumulate forever, and
-        # --exclude storage/ and .env so it can never remove a tenant's
-        # documents or the only copy of the production credentials. Those two
-        # excludes are the difference between a deploy and an incident.
-        #
-        # --checksum rather than the default mtime comparison: rsync from a
-        # fresh CI checkout sees every file as new by timestamp, so without it
-        # every deploy reuploads vendor/ in full.
+          scp app.tar.gz public.tar.gz hostgator:/home5/jabrilgino/
 
-      - name: Migrate, cache, and come back up
+      # ------------------------------------------------------------------
+      # Release
+      # ------------------------------------------------------------------
+      - name: Unpack, migrate, and swap
         env:
+          RELEASE: ${{ steps.pack.outputs.id }}
+          APP: ${{ vars.DEPLOY_PATH }}
           PHP: ${{ vars.PHP_CLI_PATH }}
-          DIR: ${{ vars.DEPLOY_PATH }}
+          MIGRATE: ${{ inputs.run_migrations }}
         run: |
-          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash -s <<EOF
-            set -e
-            cd "$DIR"
+          ssh hostgator "RELEASE='$RELEASE' APP='$APP' PHP='$PHP' MIGRATE='$MIGRATE' DOCROOT='${{ env.DOCROOT }}' bash -s" <<'REMOTE'
+          set -euo pipefail
 
-            if [ "${{ inputs.run_migrations }}" = "true" ]; then
-              "$PHP" artisan migrate --force
-            fi
+          HOME_DIR="/home5/jabrilgino"
+          DIR="$HOME_DIR/releases/$RELEASE"
+          SHARED="$HOME_DIR/shared"
 
-            # optimize:clear BEFORE the three caches, always. A cached config
-            # holding the previous .env is a deploy that appears to work and
-            # quietly uses yesterday's credentials.
-            "$PHP" artisan optimize:clear
-            "$PHP" artisan config:cache
-            "$PHP" artisan route:cache
-            "$PHP" artisan view:cache
+          [ -f "$SHARED/.env" ] || { echo "FATAL: $SHARED/.env is missing. Run deploy/hostgator-setup.sh and fill it in."; exit 1; }
 
-            "$PHP" artisan up
-          EOF
+          echo "==> Unpacking release $RELEASE"
+          rm -rf "$DIR"
+          mkdir -p "$DIR"
+          tar -xzf "$HOME_DIR/app.tar.gz" -C "$DIR"
+          rm -f "$HOME_DIR/app.tar.gz"
 
-      # The gate, not a formality. Fails the job if the host is not what the
-      # architecture assumes — including the two assets checks, which is the
-      # whole point of building in CI.
-      - name: Preflight
+          # Shared state, symlinked in. Without this every deploy would wipe
+          # every tenant document and the production credentials.
+          ln -sfn "$SHARED/.env"     "$DIR/.env"
+          ln -sfn "$SHARED/storage"  "$DIR/storage"
+          # public_path() must resolve to what Apache actually serves.
+          ln -sfn "$DOCROOT"         "$DIR/public"
+
+          chmod -R 755 "$DIR/bootstrap/cache" 2>/dev/null || true
+          chmod +x "$DIR/artisan"
+
+          echo "==> Publishing the public assets"
+          # Extracted BEFORE the symlink swap, and WITHOUT --delete. That
+          # directory holds .well-known, which AutoSSL uses to prove domain
+          # control at renewal — deleting it does not break anything today, it
+          # breaks HTTPS in about sixty days, long after anyone would connect
+          # it to a deploy. Vite filenames are content-hashed, so the outgoing
+          # and incoming builds coexist safely for the seconds in between.
+          mkdir -p "$DOCROOT"
+          tar -xzf "$HOME_DIR/public.tar.gz" -C "$DOCROOT"
+          rm -f "$HOME_DIR/public.tar.gz"
+
+          # Maintenance mode covers migrate + cache warm. The flag lives in
+          # shared storage, so it applies to whichever release is current.
+          if [ -L "$APP" ] || [ -d "$APP" ]; then
+            "$PHP" "$APP/artisan" down --retry=60 2>/dev/null || true
+          fi
+
+          if [ "$MIGRATE" = "true" ]; then
+            echo "==> Migrating"
+            "$PHP" "$DIR/artisan" migrate --force
+          else
+            echo "==> Migrations skipped by request"
+          fi
+
+          echo "==> Swapping the release symlink"
+          # ln -sfn onto a temp name then mv is the atomic form: `ln -sfn` onto
+          # an existing symlink-to-a-directory would create a link INSIDE it.
+          ln -sfn "$DIR" "$HOME_DIR/.hupm-next"
+          mv -Tf "$HOME_DIR/.hupm-next" "$APP"
+
+          echo "==> Warming caches"
+          # optimize:clear BEFORE the three caches, always. A cached config
+          # holding the previous .env is a deploy that appears to work and
+          # quietly uses yesterday's credentials.
+          "$PHP" "$APP/artisan" optimize:clear
+          "$PHP" "$APP/artisan" config:cache
+          "$PHP" "$APP/artisan" route:cache
+          "$PHP" "$APP/artisan" view:cache
+
+          "$PHP" "$APP/artisan" up
+
+          echo "==> Pruning old releases (keeping the last 5 for rollback)"
+          cd "$HOME_DIR/releases"
+          ls -1dt */ 2>/dev/null | tail -n +6 | xargs -r rm -rf
+
+          echo "==> Live release: $(readlink -f "$APP")"
+          REMOTE
+
+      # ------------------------------------------------------------------
+      # Verify
+      # ------------------------------------------------------------------
+      - name: Preflight and bank-data sweep
+        env:
+          APP: ${{ vars.DEPLOY_PATH }}
+          PHP: ${{ vars.PHP_CLI_PATH }}
         run: |
-          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan hupm:preflight"
+          # The whole TDD §12.4 checklist, on the real host, reporting observed
+          # values rather than ticks. Includes the two asset checks, which is
+          # the point of building in CI.
+          ssh hostgator "cd '$APP' && '$PHP' artisan hupm:preflight"
+          # I-5: the database holds real tenant data now.
+          ssh hostgator "cd '$APP' && '$PHP' artisan hupm:bank-data-sweep"
 
-      # I-5. The database holds real tenant data now, so this asks whether a
-      # bank number is sitting in a column that is innocent by name.
-      - name: Bank data sweep
+      - name: Health check
+        env:
+          APP_URL: ${{ vars.APP_URL }}
         run: |
-          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan hupm:bank-data-sweep"
+          set -uo pipefail
 
-      - name: Health and headers
+          # -H, never in the URL: a token in a query string lands in Apache's
+          # access log and in any proxy in between.
+          body=$(mktemp)
+          code=$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' \
+                   -H "X-Health-Token: ${{ secrets.HEALTH_TOKEN }}" \
+                   "$APP_URL/health") || code=000
+
+          echo "HTTP $code from $APP_URL/health"
+          # The body carries the reasons, never the token.
+          cat "$body"; echo
+
+          case "$code" in
+            200) echo "Healthy." ;;
+            503)
+              # Degraded is a real answer, not a transport failure. On the very
+              # FIRST deploy it is expected: /health reports the scheduler
+              # heartbeat, and cron has never run, so it is stale by
+              # definition. Add the cron entry, wait two minutes, re-check.
+              if [ "${{ inputs.tolerate_degraded_health }}" = "true" ]; then
+                echo "::warning::/health reports degraded; tolerated by request. Check the reasons above."
+              else
+                echo "::error::/health reports degraded. If this is the first deploy, add the cron entry and re-run with tolerate_degraded_health."
+                exit 1
+              fi
+              ;;
+            000) echo "::error::Could not reach $APP_URL/health at all."; exit 1 ;;
+            *)   echo "::error::Unexpected status $code from /health."; exit 1 ;;
+          esac
+
+      - name: Security headers and exposure
+        env:
+          APP_URL: ${{ vars.APP_URL }}
         run: |
-          set -e
-          curl -fsS "${{ vars.APP_URL }}/health" > /dev/null
+          set -euo pipefail
 
-          # WP-34's host half: the five headers survive whatever sits in front
-          # of the application. The middleware sets them on every response;
-          # this checks nothing strips them.
-          headers=$(curl -fsSI "${{ vars.APP_URL }}/")
-          for h in "strict-transport-security" "x-content-type-options" "x-frame-options" "referrer-policy" "content-security-policy"; do
-            echo "$headers" | grep -qi "^$h:" || { echo "MISSING HEADER: $h"; exit 1; }
+          # WP-34's host half: the middleware sets these on every response;
+          # this proves nothing in front of the application strips them.
+          headers=$(curl -fsSI --max-time 30 "$APP_URL/")
+          for h in strict-transport-security x-content-type-options x-frame-options referrer-policy content-security-policy; do
+            echo "$headers" | grep -qi "^$h:" \
+              || { echo "::error::Missing security header: $h"; exit 1; }
           done
+          echo "All five security headers present."
 
-          # And the two paths that must never be served.
-          for path in ".env" "composer.json"; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.APP_URL }}/$path")
-            [ "$code" = "200" ] && { echo "EXPOSED: /$path"; exit 1; }
+          # And the paths Apache must never serve. .env lives outside the
+          # document root by construction, so a 200 here means the layout is
+          # wrong, not that a rule is missing.
+          for path in .env composer.json composer.lock artisan README.md storage/logs/laravel.log; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$APP_URL/$path")
+            [ "$code" = "200" ] && { echo "::error::EXPOSED over HTTP: /$path"; exit 1; }
+            echo "  /$path -> $code"
           done
-          echo "Deploy verified."
+          echo "Nothing sensitive is served."
 
-      - name: Put the site back up if anything above failed
+      - name: Bring the site back up if any step failed
         if: failure()
+        env:
+          APP: ${{ vars.DEPLOY_PATH }}
+          PHP: ${{ vars.PHP_CLI_PATH }}
         run: |
-          ssh -p ${{ vars.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "cd ${{ vars.DEPLOY_PATH }} && ${{ vars.PHP_CLI_PATH }} artisan up" || true
-        # A failed deploy must not leave the portal in maintenance mode
-        # overnight. This does NOT roll the code back — see the runbook: on
-        # shared hosting the rollback is redeploying the previous tag.
+          # A failed deploy must not leave residents looking at a maintenance
+          # page overnight. This does NOT roll the code back — the previous
+          # release is still on disk under ~/releases; see the runbook.
+          ssh hostgator "[ -e '$APP' ] && '$PHP' '$APP/artisan' up" || true
+
+      - name: Clean up
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_deploy
+          ssh hostgator 'rm -f /home5/jabrilgino/app.tar.gz /home5/jabrilgino/public.tar.gz' || true
