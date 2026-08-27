@@ -69,6 +69,7 @@ class Preflight extends Command
         $this->checkDatabase();
         $this->checkRuntimeDrivers();
         $this->checkFilesystem();
+        $this->checkAssets();
         $this->checkOutbound();
         $this->checkGateway();
         $this->checkScheduler();
@@ -212,6 +213,77 @@ class Preflight extends Command
             'public/ is a subdirectory of the app',
             public_path(),
             str_starts_with(public_path(), base_path()) && public_path() !== base_path(),
+        );
+    }
+
+    /**
+     * The compiled front end actually reached the server.  [D-14]
+     *
+     * `public/build` is gitignored -- committing build output makes every
+     * branch conflict on a hashed filename -- and there is no Node here to
+     * rebuild it. So the assets arrive by upload, as a separate act from
+     * everything else, and a deploy that forgets them ships a site with no CSS
+     * and no JavaScript.
+     *
+     * That failure is quiet in the worst way: the HTML is correct, every route
+     * answers 200, the logs are clean, and the tenant portal is an unstyled
+     * column of links. Nothing in the framework notices, because as far as
+     * Laravel is concerned the page rendered.
+     *
+     * Checked here rather than trusted to a deploy checklist because a
+     * checklist is a person remembering.
+     */
+    private function checkAssets(): void
+    {
+        $manifest = public_path('build/manifest.json');
+
+        if (! is_file($manifest)) {
+            $this->record('Vite build present', 'MISSING public/build/manifest.json', false);
+
+            return;
+        }
+
+        /** @var array<string, array{file?: string}> $entries */
+        $entries = json_decode((string) file_get_contents($manifest), true) ?: [];
+
+        $missing = [];
+
+        foreach ($entries as $entry) {
+            if (isset($entry['file']) && ! is_file(public_path('build/'.$entry['file']))) {
+                $missing[] = $entry['file'];
+            }
+        }
+
+        // A manifest listing files that are not there is the signature of a
+        // partial upload -- an FTP client that stopped, or a resumed transfer
+        // that skipped the large chunks.
+        $this->record(
+            'Vite build present',
+            $missing === []
+                ? count($entries).' entries, all files present'
+                : count($missing).' file(s) named in the manifest are missing: '.implode(', ', array_slice($missing, 0, 3)),
+            $missing === [],
+        );
+
+        /*
+         | Left behind by `npm run dev`. If this file reaches the server, every
+         | @vite call points the browser at http://localhost:5173 -- so the site
+         | has no assets at all, for everyone except whoever happens to be
+         | running a dev server on their own machine, where it looks perfect.
+         |
+         | Required off the developer's machine only. Locally its presence just
+         | means `npm run dev` is running, which is the normal state and not a
+         | finding; on the host APP_ENV is production and it is a broken deploy.
+        */
+        $hot = is_file(public_path('hot'));
+
+        $this->record(
+            'no stale public/hot',
+            $hot
+                ? ($this->getLaravel()->isLocal() ? 'present (dev server running — fine locally)' : 'PRESENT — delete it')
+                : 'absent',
+            ! $hot,
+            required: ! $this->getLaravel()->isLocal(),
         );
     }
 
