@@ -55,14 +55,19 @@ Route::middleware('guest')->group(function () {
         ->middleware(['signed', 'throttle:6,1']);
 
     Route::get('forgot-password', [PasswordResetLinkController::class, 'create'])->name('password.request');
-    Route::post('forgot-password', [PasswordResetLinkController::class, 'store'])->name('password.email');
+    // [WP-34] TDD 6.2: three reset requests an hour per address. Was
+    // unthrottled -- the one route in the system that sends an email to an
+    // address chosen by an anonymous caller.
+    Route::post('forgot-password', [PasswordResetLinkController::class, 'store'])
+        ->middleware('throttle:password-reset')
+        ->name('password.email');
 
     // 60-minute expiry, single use (config/auth.php passwords.users.expire).
     Route::get('reset-password/{token}', [NewPasswordController::class, 'create'])->name('password.reset');
     Route::post('reset-password', [NewPasswordController::class, 'store'])->name('password.store');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
     Route::get('confirm-password', [ConfirmablePasswordController::class, 'show'])->name('password.confirm');
     Route::post('confirm-password', [ConfirmablePasswordController::class, 'store']);
 

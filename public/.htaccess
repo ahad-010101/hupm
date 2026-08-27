@@ -1,3 +1,41 @@
+# ---------------------------------------------------------------------------
+# TDD 6.3 shared-hosting hardening.  [WP-34]
+#
+# `.env`, `storage/` and `vendor/` sit outside the document root by
+# construction, so none of this is the primary defence -- it is the second one,
+# for the day a deploy copies the tree to the wrong place or somebody unpacks a
+# backup under public/. Apache serving a stray `.env` is not a hypothetical on
+# shared hosting; it is the single most common way a Laravel key leaks.
+#
+# mod_authz_core (Apache 2.4) and mod_access_compat (2.2) are both handled, in
+# that order, because cPanel hosts vary and a directive the running Apache does
+# not understand is a 500 for the whole site.
+# ---------------------------------------------------------------------------
+
+# Dotfiles: .env, .env.backup, .git/config, .htpasswd, editor droppings.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule (^|/)\. - [F,L]
+</IfModule>
+
+# Documentation and anything else that ships in the tree but is not a page.
+<FilesMatch "\.(md|markdown|yml|yaml|lock|json|ini|log|sh|sql|bak|dist|example)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# composer.json is the one JSON above that a curious visitor might guess; the
+# rule covers it. index.php stays reachable -- it is not matched by any pattern
+# here.
+
+# No directory listings anywhere, not only where mod_negotiation is loaded.
+Options -Indexes
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

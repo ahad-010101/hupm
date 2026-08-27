@@ -52,6 +52,18 @@ class AlertDetector
      */
     public const RETURN_RATE_MINIMUM_PAYMENTS = 10;
 
+    /**
+     * Rejected webhooks in an hour before anyone is told.  [WP-34]
+     *
+     * Not one. A public endpoint is scanned continuously and a single 401 is
+     * the system working exactly as designed — alerting on it would teach the
+     * recipient to filter the sender, which is the failure mode WP-31's whole
+     * cooldown design exists to avoid. Three in an hour is either a key
+     * mismatch, which drops every settlement notice until it is fixed, or
+     * somebody being deliberate.
+     */
+    public const REJECTED_WEBHOOK_THRESHOLD = 3;
+
     public function __construct(private readonly ReconciliationHealth $reconciliation) {}
 
     /**
@@ -67,6 +79,7 @@ class AlertDetector
             $this->failedJobs(),
             $this->highReturnRate(),
             $this->unmatchedPayment(),
+            $this->rejectedWebhooks(),
         ]));
     }
 
@@ -232,6 +245,50 @@ class AlertDetector
                 'Oldest reference' => (string) $oldest->id,
                 'Submitted' => (string) $oldest->submitted_at?->toDateString(),
                 'Window' => ReconciliationService::WINDOW_DAYS.' days',
+            ],
+        ];
+    }
+
+    /**
+     * Webhook signature failures in the last hour.  [WP-34, TDD §6.2]
+     *
+     * Counted from `audit_logs` rather than from the application log, for two
+     * reasons. The log is what the WP-31 sweep keeps free of detail, so it is
+     * deliberately the thinner record; and the log rotates on a fortnight while
+     * the audit trail is immutable and append-only, so it is the half that can
+     * still answer the question afterwards.
+     *
+     * Both endpoints count together. A key rotation that breaks one usually
+     * breaks the other -- they are rotated on the same afternoon by the same
+     * person -- and somebody probing one has found the other.
+     *
+     * @return array{alert: SystemAlert, detail: array<string, string|int>}|null
+     */
+    private function rejectedWebhooks(): ?array
+    {
+        $since = now()->subHour();
+
+        $rejections = DB::table('audit_logs')
+            ->whereIn('action', ['payment.webhook.rejected', 'notification.webhook.rejected'])
+            ->where('created_at', '>=', $since);
+
+        $count = (clone $rejections)->count();
+
+        if ($count < self::REJECTED_WEBHOOK_THRESHOLD) {
+            return null;
+        }
+
+        return [
+            'alert' => SystemAlert::WebhookRejected,
+            'detail' => [
+                'Rejected in the last hour' => $count,
+                'Threshold' => self::REJECTED_WEBHOOK_THRESHOLD,
+                // How many addresses, never which. The addresses are in the
+                // audit log where they belong; a count is what decides whether
+                // this is one misconfigured caller or a sweep, and an email is
+                // not the place to publish them (I-5 is about payment data, but
+                // the habit is the point).
+                'Distinct sources' => (clone $rejections)->distinct()->count('ip_address'),
             ],
         ];
     }

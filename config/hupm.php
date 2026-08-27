@@ -37,4 +37,31 @@ return [
         'queue_depth_warning' => (int) env('HEALTH_QUEUE_DEPTH_WARNING', 500),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Content Security Policy  [TDD 6.3, WP-34]
+    |--------------------------------------------------------------------------
+    |
+    | Whether SecurityHeaders relaxes script-src for the Vite dev server.
+    |
+    | Null means "decide by looking" -- the presence of public/hot, which is the
+    | same marker Laravel's @vite directive uses, so the policy cannot disagree
+    | with what was actually rendered. That is the right default: a developer
+    | running `npm run dev` gets a working page, and a local `npm run build`
+    | gets the strict policy the host will serve, which is where you want to
+    | discover a violation.
+    |
+    | Set explicitly to false and the strict policy is used regardless. The
+    | security review does this, because a test whose result depends on whether
+    | somebody has a dev server open is not a check, it is a coin toss.
+    |
+    | NEVER set this to true. A script-src carrying both a nonce and
+    | 'unsafe-inline' makes the browser ignore the nonce -- which is the entire
+    | protection -- and the page keeps working, so nothing tells you.
+    |
+    */
+    'csp' => [
+        'allow_vite_dev_server' => env('CSP_ALLOW_VITE_DEV_SERVER'),
+    ],
+
 ];

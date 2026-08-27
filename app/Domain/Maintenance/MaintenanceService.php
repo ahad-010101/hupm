@@ -38,6 +38,30 @@ class MaintenanceService
         'image/jpeg', 'image/png', 'image/heic', 'image/heif', 'video/mp4',
     ];
 
+    /**
+     * The extension each accepted type is STORED under.  [WP-34, TDD §6.2]
+     *
+     * The stored name is derived from the sniffed type, never from the name the
+     * browser sent. `getClientOriginalExtension()` is a substring of a string
+     * the client chose: it survived the MIME check because the check reads the
+     * file's own bytes, so the two can disagree — and when they do, the bytes
+     * are right. Trusting the client half meant `evil.php` whose content
+     * sniffed as an image was rejected, but a file that passed while *named*
+     * `.php` would have been written to disk as `<uuid>.php`.
+     *
+     * That file lands on the `local` disk, rooted at `storage/app/private`,
+     * which is outside the document root — so it was never reachable and never
+     * executable. This closes the second hole rather than the first: it means
+     * the guarantee rests on what the file IS, not on where it happens to sit.
+     */
+    private const STORED_EXTENSION = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/heic' => 'heic',
+        'image/heif' => 'heif',
+        'video/mp4' => 'mp4',
+    ];
+
     public function __construct(
         private readonly TicketNumberGenerator $numbers,
         private readonly TicketStateMachine $states,
@@ -288,9 +312,15 @@ class MaintenanceService
     ): MaintenanceAttachment {
         $this->assertAcceptable($file);
 
+        // Extension from the sniffed type, not the supplied name. [WP-34]
+        // assertAcceptable() has already refused anything not in the map, so
+        // the fallback cannot fire; it is there because a silent 'bin' is a
+        // better failure than an undefined index if the two lists ever drift.
+        $extension = self::STORED_EXTENSION[$file->getMimeType()] ?? 'bin';
+
         $path = $file->storeAs(
             "maintenance/{$ticket->id}",
-            Str::uuid().'.'.strtolower($file->getClientOriginalExtension() ?: 'bin'),
+            Str::uuid().'.'.$extension,
             'local',
         );
 

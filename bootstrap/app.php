@@ -1,12 +1,24 @@
 <?php
 
+use App\Exceptions\ImmutableRecordException;
+use App\Http\Middleware\EnforceAbsoluteSessionLifetime;
+use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\SecurityHeaders;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Symfony\Component\HttpFoundation\Response;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -29,17 +41,27 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        /*
+         | TDD 6.3 security headers, on every response.  [WP-34]
+         |
+         | Global, not per-group. There are four ways out of this application --
+         | the `web` group, the `public` group (D-05), the two webhook routes
+         | which have no group at all, and the error responses rendered below.
+         | A header attached to a group is missing from at least two of them.
+        */
+        $middleware->append(SecurityHeaders::class);
+
         $middleware->web(append: [
-            \App\Http\Middleware\HandleInertiaRequests::class,
-            \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
+            HandleInertiaRequests::class,
+            AddLinkHeadersForPreloadedAssets::class,
             // Laravel's session.lifetime is an idle timeout that slides forward
             // on every request. FR-AUTH-04 also demands a hard 12-hour ceiling,
             // which nothing in the framework provides.
-            \App\Http\Middleware\EnforceAbsoluteSessionLifetime::class,
+            EnforceAbsoluteSessionLifetime::class,
         ]);
 
         $middleware->alias([
-            'role' => \App\Http\Middleware\EnsureRole::class,
+            'role' => EnsureRole::class,
         ]);
 
         // [DEVIATION D-05] The public middleware group is the 'web' stack minus
@@ -49,12 +71,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // leak a tenant name, balance or lease detail, so the guarantee does not
         // depend on remembering to scrub them.
         $middleware->group('public', [
-            \Illuminate\Cookie\Middleware\EncryptCookies::class,
-            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
-            \Illuminate\Session\Middleware\StartSession::class,
-            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
-            \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
-            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            EncryptCookies::class,
+            AddQueuedCookiesToResponse::class,
+            StartSession::class,
+            ShareErrorsFromSession::class,
+            ValidateCsrfToken::class,
+            SubstituteBindings::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -68,7 +90,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Ownership violations return 404, never 403. A 403 confirms the record
         // exists, which tells tenant A that tenant B is a customer here
         // (invariant I-9, BR-20). Policies throw ModelNotFound for this reason.
-        $exceptions->dontReport(App\Exceptions\ImmutableRecordException::class);
+        $exceptions->dontReport(ImmutableRecordException::class);
 
         $exceptions->respond(function (Response $response, Throwable $e, Request $request) {
             $status = $response->getStatusCode();

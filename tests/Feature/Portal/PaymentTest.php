@@ -12,6 +12,7 @@ use App\Models\Payment;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use App\Providers\AppServiceProvider;
 use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -511,10 +512,24 @@ it('always allows paying the whole balance, whatever the policy says', function 
     $this->postJson('/portal/pay', payPayload(['amount' => '500.00']))->assertOk();
 });
 
-it('rate limits to fifteen attempts an hour per tenant', function () {
+it('AC-PAY-06 rate limits to five attempts an hour per tenant', function () {
+    /*
+     | Five, per TDD 6.2. This test said fifteen and passed, because the
+     | limiter said fifteen -- underneath a comment that said five. Corrected
+     | by the WP-34 security review [2026-08-27].
+     |
+     | The number now comes from the constant rather than being typed here
+     | twice. A limit test that hard-codes the figure it is checking against
+     | agrees with whatever the code does, which is how this one certified the
+     | wrong answer for weeks.
+    */
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
 
-    for ($i = 0; $i < 15; $i++) {
+    $allowed = AppServiceProvider::PAYMENT_ATTEMPTS_PER_HOUR;
+
+    expect($allowed)->toBe(5, 'TDD 6.2 says five payment submissions an hour.');
+
+    for ($i = 0; $i < $allowed; $i++) {
         $this->postJson('/portal/pay', payPayload())->assertOk();
     }
 

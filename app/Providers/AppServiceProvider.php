@@ -15,10 +15,27 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
+    /*
+     | The rate limits from TDD 6.2, as constants so the security review can
+     | assert the number rather than the behaviour.  [WP-34]
+     |
+     | A test that submits six payments and expects a 429 passes whether the
+     | limit is five or fifty-nine, because it only ever proves the limiter is
+     | wired up. That is how `perHour(15)` sat under a comment saying five.
+    */
+    public const PAYMENT_ATTEMPTS_PER_HOUR = 5;
+
+    public const CONTACT_MESSAGES_PER_HOUR = 3;
+
+    public const PASSWORD_RESETS_PER_HOUR = 3;
+
+    public const AUTHENTICATED_REQUESTS_PER_MINUTE = 120;
+
     public function register(): void
     {
         // Singletons: settings are read many times per request and the resolved
@@ -45,7 +62,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('payments', function ($request) {
             $tenantId = $request->user()?->tenant_id;
 
-            return Limit::perHour(15)
+            // [WP-34] Five, not fifteen. TDD 6.2 says five per hour per
+            // tenant and the comment above this block has always said five;
+            // only the code said fifteen. Nothing had caught it, because a
+            // limit three times too loose refuses nothing a test would try.
+            return Limit::perHour(self::PAYMENT_ATTEMPTS_PER_HOUR)
                 ->by($tenantId ? 'tenant:'.$tenantId : 'ip:'.$request->ip())
                 ->response(fn () => response()->json([
                     'message' => 'That is several payment attempts in a short time. '
@@ -64,12 +85,46 @@ class AppServiceProvider extends ServiceProvider
          | leaves somebody with no way to reach the office is not a limit, it is
          | an outage.
         */
-        RateLimiter::for('contact', fn ($request) => Limit::perHour(3)
+        RateLimiter::for('contact', fn ($request) => Limit::perHour(self::CONTACT_MESSAGES_PER_HOUR)
             ->by('ip:'.$request->ip())
             ->response(fn () => redirect()->route('public.contact')
                 ->withInput($request->except('message'))
                 ->withErrors(['message' => 'That is several messages in a short time. '
                     .'Please telephone the office if this is urgent.'])));
+
+        /*
+         | Password reset requests (TDD 6.2). Three an hour per ADDRESS.
+         |
+         | Keyed on the email rather than the IP, because the abuse this stops
+         | is mailbombing one person from anywhere -- an IP limit makes the
+         | attacker change IP, which costs nothing. Keying on the address does
+         | mean somebody can lock a stranger out of the reset flow for an hour
+         | by requesting three; that is the lesser harm, since the account
+         | itself is untouched and the office can send a fresh invitation.
+         |
+         | Lowercased and trimmed so three requests for A@b.test, a@b.test and
+         | " a@b.test " are three, not one each.
+        */
+        RateLimiter::for('password-reset', fn ($request) => Limit::perHour(self::PASSWORD_RESETS_PER_HOUR)
+            ->by('reset:'.Str::lower(trim((string) $request->input('email'))))
+            ->response(fn () => back()
+                ->withInput($request->only('email'))
+                ->withErrors(['email' => 'A reset link has already been sent recently. '
+                    .'Please check your inbox, including junk mail, or telephone the office.'])));
+
+        /*
+         | Authenticated general (TDD 6.2). 120 a minute per USER.
+         |
+         | A backstop, not a policy: two a second is far above a person using
+         | the console and far below a script walking every ledger row. It is
+         | the limit that makes scraping expensive after an account is taken
+         | over, which is the case the specific limits above do not cover.
+         |
+         | Falls back to the IP for the handful of authenticated-group routes
+         | reachable before the session resolves.
+        */
+        RateLimiter::for('authenticated', fn ($request) => Limit::perMinute(self::AUTHENTICATED_REQUESTS_PER_MINUTE)
+            ->by($request->user()?->id ? 'user:'.$request->user()->id : 'ip:'.$request->ip()));
 
         /*
          | Turn Vite's asset prefetching off for the public site.  [D-05]

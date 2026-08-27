@@ -48,7 +48,9 @@ use Inertia\Inertia;
 |
 */
 
-Route::middleware('auth')->group(function () {
+// [WP-34] TDD 6.2 authenticated general limit, 120/min per user. Applied to
+// the group rather than per route so a route added later inherits it.
+Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
     /*
      | Tenant portal
      */

@@ -3,7 +3,7 @@
 namespace App\Domain\Notifications;
 
 /**
- * The five things an administrator must be told about.  [TDD §10, WP-31]
+ * The six things an administrator must be told about.  [TDD §10, WP-31/34]
  *
  * Every one of these is a **silent** failure. Nothing errors, no page breaks,
  * no resident complains — until a month later when the numbers do not add up.
@@ -17,8 +17,13 @@ namespace App\Domain\Notifications;
  *
  * **Each alert carries its own cooldown.** An alert that repeats every hour is
  * an alert that gets filtered to a folder nobody opens, which is functionally
- * the same as never sending it. The admin console shows all five conditions
+ * the same as never sending it. The admin console shows every condition
  * continuously anyway — the email is the nudge, not the record.
+ *
+ * The sixth was added by the WP-34 security review. The first five are money
+ * going quietly wrong; this one is somebody probing an endpoint, which is a
+ * different kind of silence but the same problem — nothing breaks, so nobody
+ * looks.
  */
 enum SystemAlert: string
 {
@@ -27,6 +32,7 @@ enum SystemAlert: string
     case FailedJobs = 'failed_jobs';
     case HighReturnRate = 'high_return_rate';
     case UnmatchedPayment = 'unmatched_payment';
+    case WebhookRejected = 'webhook_rejected';
 
     public function subject(): string
     {
@@ -38,6 +44,10 @@ enum SystemAlert: string
             self::FailedJobs => 'Action needed: several background jobs are failing',
             self::HighReturnRate => 'Action needed: an unusual number of payments were returned',
             self::UnmatchedPayment => 'Action needed: a payment has gone unmatched',
+            // Not "attack" and not "action needed": the likeliest cause by far
+            // is a rotated signature key, and a subject line that cries breach
+            // for a configuration slip is a subject line that stops being read.
+            self::WebhookRejected => 'Check: payment webhooks are being rejected',
         };
     }
 
@@ -56,6 +66,10 @@ enum SystemAlert: string
                 .'That is normally a batch problem rather than several residents at once.',
             self::UnmatchedPayment => 'A payment the gateway knows about has not been matched to an '
                 .'account. It is never voided automatically — somebody has to look at it.',
+            self::WebhookRejected => 'Several webhook requests failed their signature check. Either '
+                .'the signature key here no longer matches the one in the gateway — in which case '
+                .'settlement notices are being silently dropped — or somebody is posting to the '
+                .'endpoint. Reconciliation is authoritative either way, so no money is at risk.',
         };
     }
 
@@ -74,6 +88,10 @@ enum SystemAlert: string
                 .'residents; a run of anything else is usually us or the bank.',
             self::UnmatchedPayment => 'Open Payments, filter to unmatched, and match it to the account '
                 .'by hand. Do not void it — the money may well have moved.',
+            self::WebhookRejected => 'Compare the signature key in the Authorize.Net dashboard with '
+                .'the one in the environment file. If they match, the requests are not ours — the '
+                .'audit log has the addresses, and nothing further is needed, because an unsigned '
+                .'request never reached anything.',
         };
     }
 
@@ -92,6 +110,10 @@ enum SystemAlert: string
             self::ReconciliationStale, self::BackupFailed, self::FailedJobs => 24,
             self::HighReturnRate => 24,
             self::UnmatchedPayment => 24,
+            // Six hours, not twenty-four. A mismatched key drops every
+            // settlement notice until somebody fixes it, and unlike the others
+            // this condition can start and stop several times in a day.
+            self::WebhookRejected => 6,
         };
     }
 }
