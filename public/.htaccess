@@ -61,3 +61,33 @@ Options -Indexes
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# ---------------------------------------------------------------------------
+# Re-allow PHP in THIS directory.  [WP-00H, 27 Aug 2026]
+#
+# The HostGator account carries a host-applied malware-remediation rule in
+# /home5/jabrilgino/public_html/.htaccess (mode 444, and present in sixteen
+# places across the account):
+#
+#     <FilesMatch '.(py|exe|php|PHP|...|php5|suspected)$'>
+#     Order allow,deny
+#     Deny from all
+#     </FilesMatch>
+#
+# .htaccess inherits downward, so it reaches this document root and returns
+# 403 for index.php before PHP is ever invoked. That is what made the whole
+# site 403 while static files served normally, and why disabling the
+# .htaccess IN this directory changed nothing — the rule is above it.
+#
+# Written in mod_access_compat syntax on purpose, matching the parent. Apache
+# 2.4 evaluates those directives IN ADDITION TO the modern ones, so a
+# `Require all granted` here does NOT cancel a `Deny from all` above; it was
+# tried first and the site stayed at 403.
+#
+# Scope is this directory only. The parent rule is untouched and PHP stays
+# denied everywhere else on the account.
+# ---------------------------------------------------------------------------
+<FilesMatch "\.(php|php5|phtml)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
