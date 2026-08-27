@@ -221,6 +221,21 @@ jobs:
           printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+          # ONE connection, reused by every later step — the ControlMaster
+          # block below is the fix for the reset that killed the last run.
+          #
+          # Without it this deploy opens six connections in quick succession:
+          # the test, the scp, the unpack, and two cleanup calls. HostGator's
+          # brute-force protection (cPHulk, and sshd's own MaxStartups) resets
+          # the ones arriving too fast. That is what
+          # "kex_exchange_identification: read: Connection reset by peer" was —
+          # not the key, not authentication, but the host declining to shake
+          # hands again so soon after the last time. The first ssh succeeding
+          # and the very next scp being reset is the signature of it.
+          #
+          # ControlMaster opens the socket once and every later ssh and scp
+          # rides it: one handshake, one authentication, and the rate limiter
+          # never sees a second attempt.
           cat > ~/.ssh/config <<EOF
           Host hostgator
             HostName ${{ secrets.SSH_HOST }}
@@ -231,12 +246,39 @@ jobs:
             StrictHostKeyChecking yes
             UserKnownHostsFile ~/.ssh/known_hosts
             ServerAliveInterval 30
+            ConnectTimeout 20
+            ControlMaster auto
+            ControlPath ~/.ssh/cm-%r@%h-%p
+            ControlPersist 15m
           EOF
           chmod 600 ~/.ssh/config
 
-          # Fails here rather than halfway through an upload if the key, the
-          # port or the host key is wrong.
-          ssh -o BatchMode=yes hostgator 'echo "SSH OK as $(whoami) on $(hostname)"'
+          # Sanity-check the secret before spending a connection on it. A
+          # fingerprint is a hash of the PUBLIC half and is safe to print; it
+          # is what you compare against the server's authorized_keys.
+          if ! head -n1 ~/.ssh/id_deploy | grep -q -- '-----BEGIN'; then
+            echo "::error::SSH_PRIVATE_KEY does not begin with an -----BEGIN line. Paste the private half whole, not the .pub."
+            exit 1
+          fi
+          ssh-keygen -lf ~/.ssh/id_deploy || {
+            echo "::error::SSH_PRIVATE_KEY is unreadable — it has a passphrase, or lost its line breaks when pasted."
+            exit 1
+          }
+
+          # Open the master connection, with a couple of retries. A shared
+          # host can reset a first attempt for reasons that have nothing to
+          # do with this deploy, and failing the whole run for that is noise.
+          for attempt in 1 2 3; do
+            if ssh -o BatchMode=yes hostgator 'echo "SSH OK as $(whoami) on $(hostname)"'; then
+              break
+            fi
+            [ "$attempt" = "3" ] && { echo "::error::Could not establish an SSH session after three attempts."; exit 1; }
+            echo "Attempt $attempt was refused; waiting 15s."
+            sleep 15
+          done
+
+          # Prove the socket is live, so every later step is free.
+          ssh -O check hostgator
 
       - name: Upload
         run: |
@@ -334,10 +376,26 @@ jobs:
           # A failed deploy must not leave residents looking at a maintenance
           # page overnight. This does NOT roll the code back — the previous
           # release is still on disk under ~/releases; see the runbook.
-          ssh hostgator "[ -e '$APP' ] && '$PHP' '$APP/artisan' up" || true
+          #
+          # Guarded on artisan itself, not on the directory. `hupm` can exist
+          # as a leftover or a broken symlink from an earlier failed run, in
+          # which case a -e test passes and PHP then reports "Could not open
+          # input file" — an alarming line in the log that means nothing.
+          ssh hostgator "[ -f '$APP/artisan' ] && '$PHP' '$APP/artisan' up || echo 'Nothing deployed yet; nothing to bring up.'" || true
 
       - name: Clean up
         if: always()
         run: |
-          rm -f ~/.ssh/id_deploy
+          # Remote first, THEN the key. The other order deletes the identity
+          # and immediately tries to use it: ssh falls back to every other
+          # method it has, the host counts each one, and the step ends in
+          # "no such identity" followed by "Too many authentication
+          # failures" — two frightening lines produced entirely by the
+          # cleanup step itself.
           ssh hostgator 'rm -f /home5/jabrilgino/app.tar.gz /home5/jabrilgino/public.tar.gz' || true
+
+          # Close the multiplexed session politely rather than leaving the
+          # socket for the runner teardown to sever.
+          ssh -O exit hostgator 2>/dev/null || true
+
+          rm -f ~/.ssh/id_deploy ~/.ssh/cm-* || true
