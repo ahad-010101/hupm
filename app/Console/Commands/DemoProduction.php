@@ -17,13 +17,12 @@ use Illuminate\Support\Facades\DB;
  *
  * Three things it does that `hupm:demo` does not need to:
  *
- *   1. **Forces the mail driver to `log`.** The seeder creates 26 tenants with
- *      invented addresses, and the services it drives send notifications. Left
- *      alone those go out through Resend to addresses that do not exist, and
- *      the bounces damage the sending reputation of a domain you need working
- *      for real residents. This is the reason the command exists rather than
- *      a documented "flip APP_ENV" procedure — that route silently keeps mail
- *      live.
+ *   1. **Leaves the mail driver alone** — operator decision, 28 Aug 2026. An
+ *      earlier version forced it to `log` for the duration, because the seeder
+ *      drives the real services and 26 invented addresses produce 26 bounces
+ *      on a freshly verified domain. That was overridden deliberately: mail
+ *      stays on whatever is configured. Worth knowing rather than rediscovering
+ *      if the Resend domain reputation is ever queried.
  *   2. **Refuses if the ledger already has entries.** Once real money is
  *      recorded, synthetic tenants cannot be cleanly removed: ledger rows are
  *      immutable (I-3), so a correction is a reversing entry, never a delete.
@@ -62,7 +61,7 @@ class DemoProduction extends Command
         }
 
         $this->components->warn('This writes SYNTHETIC tenants, leases and payments to '.app()->environment().'.');
-        $this->line('  Mail is forced to the log driver for this run, so nothing is sent.');
+        $this->line('  The mail driver is left exactly as configured (operator decision, 28 Aug 2026).');
         $this->line('  Undo with: php artisan hupm:demo-wipe');
         $this->newLine();
 
@@ -71,17 +70,6 @@ class DemoProduction extends Command
 
             return self::SUCCESS;
         }
-
-        /*
-         | Mail off, for the duration of this command only.
-         |
-         | Set on the live config rather than in .env, so there is no window
-         | where a half-edited .env is on disk and no chance of leaving the
-         | production mailer switched off after the command exits.
-        */
-        $mailerWas = Config::get('mail.default');
-        Config::set('mail.default', 'log');
-        $this->components->twoColumnDetail('Mail driver', "{$mailerWas} → log (this run only)");
 
         /*
          | DemoDataSeeder THROWS outside local — it does not merely skip:
@@ -106,7 +94,6 @@ class DemoProduction extends Command
         } finally {
             Config::set('app.env', $envWas);
             app()->detectEnvironment(fn () => $envWas);
-            Config::set('mail.default', $mailerWas);
         }
 
         $this->newLine();
