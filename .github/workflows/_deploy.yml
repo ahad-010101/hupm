@@ -1,18 +1,28 @@
-name: Deploy to HostGator
+name: Deploy (core)
 
-# HUPM -> https://headsuppm.com, over SSH on port 2222.
+# The deployment itself. NOT run directly — two thin wrappers call it:
 #
-# ARCHITECTURE (see deploy/hostgator-setup.sh for the one-time bootstrap):
+#   deploy-hostgator.yml   headsuppm.com          production
+#   deploy-hostinger.yml   demo.saremcotech.com   demo
 #
-#   /home5/jabrilgino/
+# Both are manual. Each supplies its own paths, port and URL, so nothing about
+# a server is written here.
+#
+# One core rather than two copies, because the two hosts differ in six values
+# and nothing else. A duplicated 450-line workflow drifts — this one already
+# did once, when a fix landed on one copy and not the other.
+#
+# ARCHITECTURE (see deploy/server-setup.sh for the one-time bootstrap):
+#
+#   $HOME_DIR/
 #   ├── hupm -> releases/<id>            symlink, swapped atomically
 #   ├── releases/<id>/
 #   │   ├── app/ bootstrap/ config/ ... vendor/ artisan
 #   │   ├── .env    -> ../../shared/.env
 #   │   ├── storage -> ../../shared/storage
-#   │   └── public  -> ../../public_html/website_0f94b77e
+#   │   └── public  -> $DOCROOT
 #   ├── shared/{.env,storage}            outlive every release
-#   └── public_html/website_0f94b77e/    cPanel Document Root (a real directory)
+#   └── $DOCROOT/                        the panel's Document Root (a real directory)
 #
 # WHY public/ IS A SYMLINK, not a copy. Laravel's public_path() is
 # base_path('public'). With the app in ~/hupm and the docroot elsewhere, it
@@ -50,35 +60,61 @@ name: Deploy to HostGator
 # NOT mean the site works. Check these yourself after deploying — they are
 # still built and still worth running:
 #
-#     ssh hostgator "cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:preflight"
-#     ssh hostgator "cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:bank-data-sweep"
-#     curl -sI https://headsuppm.com/ | grep -i -E 'strict|x-|referrer|content-security'
-#     curl -s -o /dev/null -w '%{http_code}\n' https://headsuppm.com/.env    # must not be 200
+#     ssh deploy "cd $DEPLOY_PATH && $PHP_CLI_PATH artisan hupm:preflight"
+#     ssh deploy "cd $DEPLOY_PATH && $PHP_CLI_PATH artisan hupm:bank-data-sweep"
+#     curl -sI $APP_URL/ | grep -i -E 'strict|x-|referrer|content-security'
+#     curl -s -o /dev/null -w '%{http_code}\n' $APP_URL/.env    # must not be 200
 #
 # The HEALTH_TOKEN secret is no longer read by this workflow. Keep it in the
 # server's .env — /health still needs it to return its reasons to a monitor.
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      environment:
+        description: 'GitHub Environment holding the SSH secrets for this server'
+        type: string
+        required: true
+      home_dir:
+        description: 'Account home, e.g. /home5/jabrilgino'
+        type: string
+        required: true
+      docroot:
+        description: 'Document root the panel reports'
+        type: string
+        required: true
+      deploy_path:
+        description: 'Release symlink, normally $home_dir/hupm'
+        type: string
+        required: true
+      php_cli:
+        description: 'Absolute PHP binary — never bare php (R-5)'
+        type: string
+        required: true
+      app_url:
+        description: 'https URL, no trailing slash'
+        type: string
+        required: true
+      ssh_port:
+        description: 'SSH port. cPanel 2222, Hostinger 65002'
+        type: string
+        required: true
       run_migrations:
-        description: 'Run database migrations'
         type: boolean
-        default: true
+        required: true
 
 concurrency:
   # Queue, never cancel. Two deploys extracting into the same tree is a
-  # corrupted install, and a cancelled half-extraction is the worst state of all.
-  group: deploy-production
+  # corrupted install, and a cancelled half-extraction is the worst state of
+  # all. Keyed per environment, so demo never waits on production.
+  group: deploy-${{ inputs.environment }}
   cancel-in-progress: false
-
-env:
-  DOCROOT: /home5/jabrilgino/public_html/website_0f94b77e
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
+    # Secrets resolve from the caller's environment.
+    environment: ${{ inputs.environment }}
     timeout-minutes: 30
 
     steps:
@@ -160,7 +196,7 @@ jobs:
       - name: Rewrite public/index.php for the split root
         run: |
           set -e
-          APP="${{ vars.DEPLOY_PATH }}"
+          APP="${{ inputs.deploy_path }}"
 
           # index.php ships with paths relative to itself (__DIR__.'/../…').
           # Served from the cPanel docroot, '..' is ~/public_html — which holds
@@ -253,10 +289,10 @@ jobs:
           # rides it: one handshake, one authentication, and the rate limiter
           # never sees a second attempt.
           cat > ~/.ssh/config <<EOF
-          Host hostgator
+          Host deploy
             HostName ${{ secrets.SSH_HOST }}
             User ${{ secrets.SSH_USER }}
-            Port ${{ vars.SSH_PORT }}
+            Port ${{ inputs.ssh_port }}
             IdentityFile ~/.ssh/id_deploy
             IdentitiesOnly yes
             StrictHostKeyChecking yes
@@ -285,7 +321,7 @@ jobs:
           # host can reset a first attempt for reasons that have nothing to
           # do with this deploy, and failing the whole run for that is noise.
           for attempt in 1 2 3; do
-            if ssh -o BatchMode=yes hostgator 'echo "SSH OK as $(whoami) on $(hostname)"'; then
+            if ssh -o BatchMode=yes deploy 'echo "SSH OK as $(whoami) on $(hostname)"'; then
               break
             fi
             [ "$attempt" = "3" ] && { echo "::error::Could not establish an SSH session after three attempts."; exit 1; }
@@ -294,11 +330,11 @@ jobs:
           done
 
           # Prove the socket is live, so every later step is free.
-          ssh -O check hostgator
+          ssh -O check deploy
 
       - name: Upload
         run: |
-          scp app.tar.gz public.tar.gz hostgator:/home5/jabrilgino/
+          scp app.tar.gz public.tar.gz deploy:${{ inputs.home_dir }}/
 
       # ------------------------------------------------------------------
       # Release
@@ -306,18 +342,17 @@ jobs:
       - name: Unpack, migrate, and swap
         env:
           RELEASE: ${{ steps.pack.outputs.id }}
-          APP: ${{ vars.DEPLOY_PATH }}
-          PHP: ${{ vars.PHP_CLI_PATH }}
+          APP: ${{ inputs.deploy_path }}
+          PHP: ${{ inputs.php_cli }}
           MIGRATE: ${{ inputs.run_migrations }}
         run: |
-          ssh hostgator "RELEASE='$RELEASE' APP='$APP' PHP='$PHP' MIGRATE='$MIGRATE' DOCROOT='${{ env.DOCROOT }}' bash -s" <<'REMOTE'
+          ssh deploy "RELEASE='$RELEASE' APP='$APP' PHP='$PHP' MIGRATE='$MIGRATE' DOCROOT='${{ inputs.docroot }}' HOME_DIR='${{ inputs.home_dir }}' bash -s" <<'REMOTE'
           set -euo pipefail
 
-          HOME_DIR="/home5/jabrilgino"
           DIR="$HOME_DIR/releases/$RELEASE"
           SHARED="$HOME_DIR/shared"
 
-          [ -f "$SHARED/.env" ] || { echo "FATAL: $SHARED/.env is missing. Run deploy/hostgator-setup.sh and fill it in."; exit 1; }
+          [ -f "$SHARED/.env" ] || { echo "FATAL: $SHARED/.env is missing. Run deploy/server-setup.sh and fill it in."; exit 1; }
 
           echo "==> Unpacking release $RELEASE"
           rm -rf "$DIR"
@@ -329,7 +364,7 @@ jobs:
           #
           # The tarball excludes ./storage and the release symlinks it out to
           # shared state, so these directories exist ONLY if they were created
-          # here or by hostgator-setup.sh. When framework/views was missing,
+          # here or by server-setup.sh. When framework/views was missing,
           # `optimize:clear` died on "View path not found." — the framework's
           # default wraps that path in realpath(), which returns false rather
           # than a path when the directory is not there. config/view.php now
@@ -414,8 +449,8 @@ jobs:
       - name: Bring the site back up if any step failed
         if: failure()
         env:
-          APP: ${{ vars.DEPLOY_PATH }}
-          PHP: ${{ vars.PHP_CLI_PATH }}
+          APP: ${{ inputs.deploy_path }}
+          PHP: ${{ inputs.php_cli }}
         run: |
           # A failed deploy must not leave residents looking at a maintenance
           # page overnight. This does NOT roll the code back — the previous
@@ -425,7 +460,7 @@ jobs:
           # as a leftover or a broken symlink from an earlier failed run, in
           # which case a -e test passes and PHP then reports "Could not open
           # input file" — an alarming line in the log that means nothing.
-          ssh hostgator "[ -f '$APP/artisan' ] && '$PHP' '$APP/artisan' up || echo 'Nothing deployed yet; nothing to bring up.'" || true
+          ssh deploy "[ -f '$APP/artisan' ] && '$PHP' '$APP/artisan' up || echo 'Nothing deployed yet; nothing to bring up.'" || true
 
       - name: Clean up
         if: always()
@@ -436,10 +471,10 @@ jobs:
           # "no such identity" followed by "Too many authentication
           # failures" — two frightening lines produced entirely by the
           # cleanup step itself.
-          ssh hostgator 'rm -f /home5/jabrilgino/app.tar.gz /home5/jabrilgino/public.tar.gz' || true
+          ssh deploy "rm -f ${{ inputs.home_dir }}/app.tar.gz ${{ inputs.home_dir }}/public.tar.gz" || true
 
           # Close the multiplexed session politely rather than leaving the
           # socket for the runner teardown to sever.
-          ssh -O exit hostgator 2>/dev/null || true
+          ssh -O exit deploy 2>/dev/null || true
 
           rm -f ~/.ssh/id_deploy ~/.ssh/cm-* || true

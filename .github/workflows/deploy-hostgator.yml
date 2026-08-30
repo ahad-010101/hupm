@@ -1,0 +1,48 @@
+name: Deploy — HostGator (headsuppm.com)
+
+# PRODUCTION. Manual only.
+#
+# This system moves rent and ledger rows are immutable (I-3), so a migration
+# must never run because somebody merged a README change.
+#
+# The work happens in _deploy.yml. This file is only the six values that make
+# a server this server, kept here rather than in GitHub Variables because none
+# of them is secret and a path you can read in a diff is worth more than one
+# you have to go and look up in a settings page.
+#
+# Secrets DO come from the environment — SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS,
+# SSH_HOST and SSH_USER live in the `production` Environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run database migrations'
+        type: boolean
+        default: true
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
+    with:
+      environment: production
+
+      home_dir: /home5/jabrilgino
+      deploy_path: /home5/jabrilgino/hupm
+
+      # cPanel's own Document Root for headsuppm.com, and it cannot be
+      # repointed at the application's public/ — hence the split-root handling
+      # in the core workflow.
+      docroot: /home5/jabrilgino/public_html/website_0f94b77e
+
+      # Absolute, never bare `php`. cron with a wrong PHP path is the single
+      # most common shared-hosting failure and it fails silently (R-5).
+      php_cli: /usr/local/bin/php
+
+      app_url: https://headsuppm.com
+
+      # HostGator shared SSH.
+      ssh_port: '2222'
+
+      run_migrations: ${{ inputs.run_migrations }}

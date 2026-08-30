@@ -318,13 +318,17 @@ Tick the two open WP-34 boxes and all five WP-00H boxes only after this.
 
 ## Deploying from GitHub Actions instead
 
-Two workflows ship with the repo. They do the same thing as the stages above, in
-the same order, with the parts that get forgotten made structural.
+The workflows do the same thing as the stages above, in the same order, with the parts
+that get forgotten made structural. **All of them are manual** — nothing runs on push.
 
-- `.github/workflows/ci.yml` — tests against **MySQL 8, not SQLite** (D-15: this
-  schema cannot be built on SQLite), Pint, `composer audit`, `npm audit`.
-- `.github/workflows/deploy.yml` — **manual only** (`workflow_dispatch`), gated on CI,
-  and pointed at a `production` environment so you can require an approval.
+- **Deploy — HostGator** (`deploy-hostgator.yml`) → `headsuppm.com`
+- **Deploy — Hostinger** (`deploy-hostinger.yml`) → `demo.saremcotech.com`
+- `_deploy.yml` — the shared core both call. Not run directly.
+- **CI** (`ci.yml`) — the suite against **MySQL 8, not SQLite** (D-15: this schema cannot
+  be built on SQLite), plus Pint and both audits. Not a gate on deploying.
+
+Per-host setup, secrets and the differences between cPanel and hPanel are in
+[../deploy/README.md](../deploy/README.md).
 
 **Why it is worth doing.** The runner has Node, so `public/build` is compiled on every
 deploy and cannot be forgotten — which is D-14 solved structurally rather than by a

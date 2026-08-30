@@ -1,23 +1,44 @@
 #!/usr/bin/env bash
 #
-# One-time HostGator bootstrap.  Run ONCE, by hand, over SSH, before the first
-# GitHub Actions deploy.  Safe to re-run: every step is idempotent.
+# One-time server bootstrap. Run ONCE, by hand, over SSH, before the first
+# deploy. Safe to re-run: every step is idempotent.
 #
-#   ssh -p 2222 jabrilgino@192.185.52.206
-#   bash ~/hostgator-setup.sh
+# Host-agnostic — it takes the three paths it needs, because HostGator (cPanel)
+# and Hostinger (hPanel) lay an account out differently and hardcoding one of
+# them is how the second server silently gets the first server's directories.
 #
-# What it does NOT do: create .env (you write that by hand, once — production
-# credentials do not belong in a CI secret store), install Composer (the
-# workflow builds vendor/ on the runner), or add the cron entry (cPanel).
+#   HostGator / cPanel
+#     HOME_DIR=/home5/jabrilgino \
+#     DOCROOT=/home5/jabrilgino/public_html/website_0f94b77e \
+#     PHP=/usr/local/bin/php \
+#     bash server-setup.sh
+#
+#   Hostinger / hPanel  (subdomain; confirm the real path in hPanel first)
+#     HOME_DIR=/home/u123456789 \
+#     DOCROOT=/home/u123456789/domains/demo.saremcotech.com/public_html \
+#     PHP=/usr/bin/php \
+#     bash server-setup.sh
+#
+# What it does NOT do: create .env with real values (you fill that in by hand,
+# once — production credentials do not belong in a CI secret store), install
+# Composer (the workflow builds vendor/ on the runner), or add the cron entry.
 
 set -euo pipefail
 
-HOME_DIR="/home5/jabrilgino"
-APP_LINK="$HOME_DIR/hupm"                                   # symlink -> current release
+# Every one of these can be overridden from the environment; the defaults are
+# the HostGator account, because that is the one that already exists.
+HOME_DIR="${HOME_DIR:-$HOME}"
+DOCROOT="${DOCROOT:?Set DOCROOT to the document root the panel reports}"
+PHP="${PHP:-$(command -v php)}"
+
+APP_LINK="$HOME_DIR/hupm"          # symlink -> current release
 RELEASES="$HOME_DIR/releases"
 SHARED="$HOME_DIR/shared"
-DOCROOT="$HOME_DIR/public_html/website_0f94b77e"            # cPanel Document Root
-PHP="/usr/local/bin/php"
+
+echo "  HOME_DIR = $HOME_DIR"
+echo "  DOCROOT  = $DOCROOT"
+echo "  PHP      = $PHP"
+echo
 
 echo "==> Checking the things the architecture assumes"
 
@@ -56,13 +77,13 @@ if [ ! -f "$SHARED/.env" ]; then
 # HUPM production. Written by hand, once. NEVER deployed from the repository.
 #
 # Fill every value below, then run:
-#     /usr/local/bin/php /home5/jabrilgino/hupm/artisan key:generate
+#     $PHP $HOME_DIR/hupm/artisan key:generate
 #
 APP_NAME="Heads Up Enterprises"
 APP_ENV=production
 APP_KEY=
 APP_DEBUG=false
-APP_URL=https://headsuppm.com
+APP_URL=https://CHANGE-ME
 
 # Storage is UTC by design (D-07). Every business date — due day, grace expiry,
 # day-5 delinquency, proration — resolves through App\Support\BusinessCalendar
@@ -94,7 +115,7 @@ LOG_LEVEL=warning
 MAIL_MAILER=resend
 RESEND_API_KEY=
 RESEND_WEBHOOK_SECRET=
-MAIL_FROM_ADDRESS="no-reply@headsuppm.com"
+MAIL_FROM_ADDRESS="no-reply@CHANGE-ME"
 MAIL_FROM_NAME="${APP_NAME}"
 
 # Sandbox until a sandbox payment has settled and reconciled ON THIS HOST.
@@ -114,7 +135,7 @@ fi
 
 chmod 600 "$SHARED/.env"
 
-echo "==> Protecting the document root's cPanel-owned entries"
+echo "==> Protecting entries the panel owns in the document root"
 
 # .well-known is how AutoSSL proves domain control at renewal. Losing it does
 # not break anything today — it breaks HTTPS in about sixty days, long after
@@ -130,7 +151,7 @@ echo "    app link : $APP_LINK -> (created by the first deploy)"
 echo ""
 echo "Next:"
 echo "  1. Edit $SHARED/.env and fill in every blank."
-echo "  2. Create the MySQL database and user in cPanel; disable remote access."
-echo "  3. Run the GitHub Actions 'Deploy to HostGator' workflow."
-echo "  4. After it succeeds, add the cron entry in cPanel (every minute):"
+echo "  2. Create the MySQL database and user in your panel; disable remote access."
+echo "  3. Run the GitHub Actions 'Deploy' workflow and pick this target."
+echo "  4. After it succeeds, add the cron entry in your panel (EVERY MINUTE):"
 echo "     * * * * * $PHP $APP_LINK/artisan schedule:run >> /dev/null 2>&1"

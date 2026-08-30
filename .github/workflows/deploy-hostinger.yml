@@ -1,0 +1,63 @@
+name: Deploy — Hostinger (demo.saremcotech.com)
+
+# DEMO. Manual only.
+#
+# The same application as production, on a different host, for showing the
+# client. Nothing here is real tenant data and nothing here is the M1 gate.
+#
+# The work happens in _deploy.yml. This file is only the six values that make
+# a server this server. Secrets — SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS, SSH_HOST,
+# SSH_USER — come from the `demo` Environment.
+#
+# HOW HOSTINGER DIFFERS FROM HOSTGATOR, since the two are easy to conflate:
+#
+#   - SSH is on 65002, not 2222.
+#   - The account root is /home/u<digits>, not /home5/<name>.
+#   - A subdomain lives under domains/<parent>/public_html/<sub>, so the
+#     document root is a path INSIDE the parent domain rather than a generated
+#     directory beside it.
+#   - PHP is /usr/bin/php.
+#   - Composer IS installed (/usr/local/bin/composer), which HostGator has no
+#     equivalent of. That means `hupm:demo-production` can seed demo data
+#     directly here once dev dependencies are present, rather than needing the
+#     dump-and-import route production required — Faker is a dev dependency and
+#     a --no-dev install does not have it.
+#   - No malware-remediation .htaccess. The `Deny from all` rule that 403'd
+#     every PHP file on HostGator is a property of that account, not of shared
+#     hosting. The re-allow block in public/.htaccess is inert here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run database migrations'
+        type: boolean
+        default: true
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
+    with:
+      environment: demo
+
+      home_dir: /home/u529996195
+      deploy_path: /home/u529996195/hupm
+
+      # Confirmed on the server, not assumed from hPanel's layout: the
+      # subdomain sits under the PARENT domain's public_html, not under
+      # domains/demo.saremcotech.com/. Getting this wrong points the release's
+      # public symlink at a directory nothing serves, and the failure is a
+      # blank page rather than an error.
+      docroot: /home/u529996195/domains/saremcotech.com/public_html/demo
+
+      # PHP 8.3.30 — the same minor the runner builds against, so Composer's
+      # platform_check cannot object.
+      php_cli: /usr/bin/php
+
+      app_url: https://demo.saremcotech.com
+
+      # Hostinger's standard SSH port.
+      ssh_port: '65002'
+
+      run_migrations: ${{ inputs.run_migrations }}

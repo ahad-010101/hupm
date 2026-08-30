@@ -1,9 +1,50 @@
-# Deploying HUPM to HostGator from GitHub Actions
+# Deploying HUPM from GitHub Actions
 
-`headsuppm.com` · `192.185.52.206:2222` · `/home5/jabrilgino`
+Two servers, two workflows, both run by hand:
+
+| Workflow | Site | Host | SSH | Environment |
+|---|---|---|---|---|
+| **Deploy — HostGator** | `headsuppm.com` | HostGator, cPanel | `192.185.52.206:2222` | `production` |
+| **Deploy — Hostinger** | `demo.saremcotech.com` | Hostinger, hPanel | port `65002` | `demo` |
+
+Both call `.github/workflows/_deploy.yml`, which holds the actual work. One core rather
+than two copies, because the hosts differ in six values and nothing else — a duplicated
+450-line workflow drifts, and this one already did once when a fix landed on one copy.
+
+The six values live in the caller files, in plain sight and diffable:
+
+| | HostGator | Hostinger |
+|---|---|---|
+| `home_dir` | `/home5/jabrilgino` | `/home/u529996195` |
+| `deploy_path` | `/home5/jabrilgino/hupm` | `/home/u529996195/hupm` |
+| `docroot` | `/home5/jabrilgino/public_html/website_0f94b77e` | `/home/u529996195/domains/saremcotech.com/public_html/demo` |
+| `php_cli` | `/usr/local/bin/php` | `/usr/bin/php` |
+| `app_url` | `https://headsuppm.com` | `https://demo.saremcotech.com` |
+| `ssh_port` | `2222` | `65002` |
 
 The by-hand procedure is [../docs/deployment.md](../docs/deployment.md). This is the
-automated path, and it is the one to use once the account is set up.
+automated path, and it is the one to use once an account is set up.
+
+### What Hostinger does differently
+
+Beyond those six values, three things are worth knowing before you assume a HostGator
+habit transfers:
+
+- **A subdomain sits under the PARENT domain's `public_html`**, so the document root is
+  `domains/saremcotech.com/public_html/demo` — not `domains/demo.saremcotech.com/`.
+  Confirmed on the server rather than inferred; getting it wrong points the release's
+  `public` symlink at a directory nothing serves, and that shows up as a blank page
+  rather than an error.
+- **Composer is installed** (`/usr/local/bin/composer`). HostGator has none. So
+  `hupm:demo-production` can seed the demo portfolio directly on Hostinger once dev
+  dependencies are present, instead of the dump-and-import detour production needed —
+  Faker is a dev dependency and a `--no-dev` install does not have it.
+- **No malware-remediation `.htaccess`.** The `Deny from all` rule that 403'd every PHP
+  file on HostGator is a property of that account, not of shared hosting. The re-allow
+  block in `public/.htaccess` is inert here.
+
+DNS for `saremcotech.com` is already on Hostinger's nameservers (`ns1/ns2.dns-parking.com`),
+so a subdomain's A record is created by hPanel — nothing to do at the registrar.
 
 ---
 
@@ -59,27 +100,23 @@ coexist safely for the seconds in between.
 
 ---
 
-## 2. Secrets and variables
+## 2. Secrets
 
-**Settings → Secrets and variables → Actions**
+**Settings → Environments.** Two environments, four secrets each. Nothing else needs
+configuring in the GitHub UI — the paths and ports are in the caller workflows.
 
-| Secret | Value |
-|---|---|
-| `SSH_PRIVATE_KEY` | the deploy key's private half, no passphrase |
-| `SSH_KNOWN_HOSTS` | output of `ssh-keyscan -p 2222 192.185.52.206` |
-| `SSH_HOST` | `192.185.52.206` |
-| `SSH_USER` | `jabrilgino` |
-| `HEALTH_TOKEN` | must match `HEALTH_TOKEN` in `shared/.env` |
+| Secret | `production` (HostGator) | `demo` (Hostinger) |
+|---|---|---|
+| `SSH_PRIVATE_KEY` | deploy key, private half, no passphrase | as HostGator, or its own key |
+| `SSH_KNOWN_HOSTS` | `ssh-keyscan -p 2222 192.185.52.206` | `ssh-keyscan -p 65002 <host>` |
+| `SSH_HOST` | `192.185.52.206` | from hPanel → Advanced → SSH Access |
+| `SSH_USER` | `jabrilgino` | `u529996195` |
 
-| Variable | Value |
-|---|---|
-| `SSH_PORT` | `2222` |
-| `DEPLOY_PATH` | `/home5/jabrilgino/hupm` |
-| `PHP_CLI_PATH` | `/usr/local/bin/php` |
-| `APP_URL` | `https://headsuppm.com` |
+`HEALTH_TOKEN` is no longer read by the workflow — it stays in the server's `.env`,
+because `/health` still needs it to return its reasons to a monitor.
 
-Also create an **Environment** named `production` (Settings → Environments) and add
-yourself as a required reviewer. The deploy then waits for an approval.
+Add yourself as a **required reviewer** on `production` so a deploy there waits for an
+approval. `demo` does not need one.
 
 ---
 
@@ -136,8 +173,8 @@ deploys until `DB_*`, `RESEND_API_KEY` and `HEALTH_TOKEN` are set.
 
 ## 4. The first deployment
 
-Run **Actions → Deploy to HostGator → Run workflow** with `run_migrations` set to
-**true**.
+Run **Actions → Deploy — HostGator → Run workflow** (or **Deploy — Hostinger**, for the
+demo) with `run_migrations` set to **true**.
 
 Then, on the server:
 
@@ -176,8 +213,8 @@ then on a 503 means something genuinely needs attention.
 
 ## 5. Every deploy after that
 
-Actions → Deploy to HostGator → Run workflow. Leave `run_migrations` on unless you know
-this release has none.
+Actions → **Deploy — HostGator** or **Deploy — Hostinger** → Run workflow. Leave
+`run_migrations` on unless you know this release has none.
 
 The workflow, in order: build `vendor/` and the Vite assets → rewrite `index.php` for
 the split root → tar → SSH → unpack to a new release → symlink shared state →
