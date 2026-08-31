@@ -35,12 +35,28 @@ class RealPortfolioSeeder extends Seeder
 {
     public function __construct(private readonly LeaseService $leases) {}
 
+    /**
+     * The operator's deliberate opt-in for a non-local load.
+     *
+     * Outside local/testing this seeder is off. It is not enough to be careful:
+     * `db:seed` runs from deploy scripts, and a portfolio of real tenants must
+     * not be able to appear on a host because a workflow called the wrong
+     * class. Requiring a variable that exists only in the one shell that means
+     * it keeps the accident impossible while leaving the deliberate act open.
+     */
+    private const PRODUCTION_OPT_IN = 'HUPM_ALLOW_REAL_DATA_LOAD';
+
     public function run(): void
     {
-        if (! app()->environment(['local', 'testing'])) {
+        if (! app()->environment(['local', 'testing']) && getenv(self::PRODUCTION_OPT_IN) !== '1') {
             $this->command?->error('RealPortfolioSeeder refused: this is real tenant data and WP-00H has not passed.');
+            $this->command?->line('  Set '.self::PRODUCTION_OPT_IN.'=1 in the invoking shell to override deliberately.');
 
             return;
+        }
+
+        if (! app()->environment(['local', 'testing'])) {
+            $this->command?->warn('Loading REAL TENANT DATA into '.app()->environment().' by explicit opt-in.');
         }
 
         $doc = $this->load();
