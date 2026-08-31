@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Support\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -85,6 +86,10 @@ class TenantController extends Controller
                 ]),
                 'name' => $tenant->fullName(),
                 'contactable' => $tenant->isContactable(),
+                // Whether they may be archived is a data question, and the
+                // answer decides what the action says as well as whether it
+                // fires — the button is always present, never merely absent.
+                'archivable' => $tenant->isDeletable(),
             ],
             'account' => $tenant->users->first()?->only(['id', 'email', 'status', 'last_login_at']),
             'leases' => $tenant->leases->map(fn ($lease) => [
@@ -157,17 +162,27 @@ class TenantController extends Controller
      */
     public function destroy(Tenant $tenant, AuditLogger $audit): RedirectResponse
     {
-        if ($tenant->leases()->where('status', 'active')->exists()) {
+        if (! $tenant->isDeletable()) {
             return back()->withErrors([
-                'tenant' => 'This tenant has an active lease. End the lease before removing them.',
+                'tenant' => 'This tenant has an active lease. End the lease before archiving them.',
             ]);
         }
 
-        $audit->record('tenant.archived', $tenant, $tenant->only(['first_name', 'last_name', 'email']));
-        $tenant->delete();
+        DB::transaction(function () use ($tenant, $audit) {
+            $audit->record('tenant.archived', $tenant, $tenant->only(['first_name', 'last_name', 'email']));
+
+            // The tenant row soft-deletes, but `users` does not — so without
+            // this the login survives its own subject. `User::tenant()` is a
+            // plain belongsTo, so the portal would then read a null tenant on
+            // every page. LoginRequest already refuses any non-active status,
+            // which makes suspension the whole fix rather than a new auth path.
+            $tenant->users()->update(['status' => User::STATUS_SUSPENDED]);
+
+            $tenant->delete();
+        });
 
         return redirect()
             ->route('admin.tenants.index')
-            ->with('status', 'Tenant archived. Their history is retained.');
+            ->with('status', 'Tenant archived. Their history is retained and their portal sign-in is disabled.');
     }
 }

@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import AdminLayout from '@/Layouts/AdminLayout';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 import DataTable from '@/Components/DataTable';
 import EmptyState from '@/Components/EmptyState';
 import StatusBadge from '@/Components/StatusBadge';
@@ -9,6 +11,18 @@ import Money from '@/Components/Money';
 /** Tenant detail: contact, portal account, leases.  [FR-REG-02, API-ADM-07] */
 export default function Show({ tenant, account, leases, flash = {}, errors = {} }) {
     const invite = useForm({});
+    const [confirmingArchive, setConfirmingArchive] = useState(false);
+    const [archiving, setArchiving] = useState(false);
+
+    const archive = () => {
+        setArchiving(true);
+        router.delete(`/admin/tenants/${tenant.id}`, {
+            onFinish: () => {
+                setArchiving(false);
+                setConfirmingArchive(false);
+            },
+        });
+    };
 
     const leaseColumns = [
         {
@@ -88,12 +102,36 @@ export default function Show({ tenant, account, leases, flash = {}, errors = {} 
                         <p className="mt-3 border-t border-gray-100 pt-3 text-base text-gray-700">{tenant.notes}</p>
                     )}
 
-                    <Link
-                        href={`/admin/tenants/${tenant.id}/edit`}
-                        className="mt-4 inline-flex min-h-touch items-center rounded-md border border-gray-300 px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-                    >
-                        Edit details
-                    </Link>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                        <Link
+                            href={`/admin/tenants/${tenant.id}/edit`}
+                            className="inline-flex min-h-touch items-center rounded-md border border-gray-300 px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                        >
+                            Edit details
+                        </Link>
+                        {/* Archiving is a soft delete: the ledger, the payments
+                            and the tenancy all survive it. Only a live tenancy
+                            blocks, and the sentence below says so. */}
+                        <button
+                            type="button"
+                            disabled={!tenant.archivable}
+                            aria-describedby={tenant.archivable ? undefined : 'archive-blocked'}
+                            onClick={() => setConfirmingArchive(true)}
+                            className={
+                                tenant.archivable
+                                    ? 'inline-flex min-h-touch items-center rounded-md border border-overdue-border px-4 text-base font-medium text-overdue-fg hover:bg-overdue-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-overdue-fg'
+                                    : 'inline-flex min-h-touch cursor-not-allowed items-center rounded-md border border-gray-300 px-4 text-base font-medium text-gray-500'
+                            }
+                        >
+                            Archive tenant
+                        </button>
+                    </div>
+
+                    {!tenant.archivable && (
+                        <p id="archive-blocked" className="mt-2 text-sm text-gray-600">
+                            This tenant has an active lease. End the lease before archiving them.
+                        </p>
+                    )}
                 </section>
 
                 <section className="rounded-lg border border-gray-200 bg-white p-4">
@@ -165,6 +203,19 @@ export default function Show({ tenant, account, leases, flash = {}, errors = {} 
                 caption={`Leases for ${tenant.name}`}
                 empty={<EmptyState title="No leases yet." description="Create a lease to start posting rent." />}
             />
+
+            <ConfirmDialog
+                open={confirmingArchive}
+                title={`Archive ${tenant.name}?`}
+                confirmLabel="Archive"
+                tone="danger"
+                processing={archiving}
+                onCancel={() => setConfirmingArchive(false)}
+                onConfirm={archive}
+            >
+                Their ledger, payments and lease history are kept. Their portal sign-in is disabled
+                and their email address is released for reuse.
+            </ConfirmDialog>
         </AdminLayout>
     );
 }

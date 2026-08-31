@@ -2,6 +2,7 @@
 
 use App\Models\HousingAuthority;
 use App\Models\Lease;
+use App\Models\Property;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
@@ -319,3 +320,26 @@ it('keeps non-admins out of leases', function (string $role) {
 
     expect(Lease::count())->toBe(0);
 })->with(['tenant', 'owner']);
+
+it('AC-REG-01 offers a property with no units on the lease form, ordered by name', function () {
+    // The reported bug: the form carried a flat list of units, so a property
+    // with none contributed no options and looked as though it had never saved.
+    $empty = Property::factory()->create(['name' => 'Aardvark Place']);
+    $stocked = Property::factory()->create(['name' => 'Zebra Court']);
+    Unit::factory()->create(['property_id' => $stocked->id, 'unit_number' => '1']);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/leases/create')
+        ->assertOk()
+        ->assertInertia(function ($page) use ($empty, $stocked) {
+            $properties = collect($page->toArray()['props']['properties']);
+            $ids = $properties->pluck('id');
+
+            expect($properties->firstWhere('id', $empty->id))->not->toBeNull()
+                ->and($properties->firstWhere('id', $empty->id)['units'])->toBe([])
+                ->and($properties->firstWhere('id', $stocked->id)['units'])->toHaveCount(1)
+                // By name, not by insertion order — a newly added property is
+                // not exiled to the bottom of a list of twenty-five.
+                ->and($ids->search($empty->id))->toBeLessThan($ids->search($stocked->id));
+        });
+});

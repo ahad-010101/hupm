@@ -10,8 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * A building or address.  [FR-REG-01]
  *
  * No soft deletes — DB §A4 applies those to tenants and vendors only. A
- * property with units cannot be deleted at all (RESTRICT), which in practice
- * means any property in use is permanent.
+ * property whose units carry lease history cannot be deleted at all
+ * (RESTRICT), which in practice means any property in use is permanent.
  */
 class Property extends Model
 {
@@ -39,10 +39,28 @@ class Property extends Model
         return $this->hasMany(WeatherAlert::class);
     }
 
-    /** A property may only be removed while it has no units (DB §A4, RESTRICT). */
+    /**
+     * How many units carry lease history, and so pin the property in place.
+     *
+     * The count rather than a boolean, because the admin needs to be told what
+     * is blocking removal — "2 of 3 units have lease history" is actionable
+     * where a greyed-out button is not.
+     */
+    public function unitsWithHistory(): int
+    {
+        return $this->units()->whereHas('leases')->count();
+    }
+
+    /**
+     * A property may be removed once no unit carries lease history (DB §A4).
+     *
+     * Lease-free units are not an obstacle: they hold no financial record, so
+     * the destroy action removes them alongside their property in one act
+     * rather than making the admin clear them by hand first.
+     */
     public function isDeletable(): bool
     {
-        return ! $this->units()->exists();
+        return $this->unitsWithHistory() === 0;
     }
 
     /**

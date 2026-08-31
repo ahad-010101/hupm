@@ -62,6 +62,19 @@ class Tenant extends Model
         return $this->users()->where('status', User::STATUS_ACTIVE)->exists();
     }
 
+    /**
+     * Whether this tenant may be archived, mirroring Property and Unit.
+     *
+     * An ended lease is no obstacle — archiving is a soft delete and the whole
+     * point is that the ledger, the payments and the tenancy survive it. Only a
+     * live tenancy blocks, because charges would keep posting against a record
+     * that no longer appears anywhere.
+     */
+    public function isDeletable(): bool
+    {
+        return ! $this->leases()->where('status', Lease::STATUS_ACTIVE)->exists();
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(Document::class);
