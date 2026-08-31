@@ -13,7 +13,7 @@ import Money, { formatMoney } from '@/Components/Money';
  * own (GAP-1, DB §C1) — they are terms of the tenancy and belong beside the
  * other terms.
  */
-export default function Form({ lease, tenants, units, authorities, preselectedTenantId, flash = {} }) {
+export default function Form({ lease, tenants, properties, authorities, preselectedTenantId, flash = {} }) {
     const editing = Boolean(lease);
     const [terminating, setTerminating] = useState(false);
 
@@ -112,11 +112,25 @@ export default function Form({ lease, tenants, units, authorities, preselectedTe
                             className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
                         >
                             <option value="">Choose a unit…</option>
-                            {units.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                    {u.label}
-                                    {u.status === 'occupied' ? ' (occupied)' : ''}
-                                </option>
+                            {/* Grouped by property, and a property with no units
+                                still appears — carrying a disabled row that says
+                                what to do. Omitting it made a newly added
+                                property look as though it had not saved. */}
+                            {properties.map((p) => (
+                                <optgroup key={p.id} label={p.name}>
+                                    {p.units.length === 0 ? (
+                                        <option value="" disabled>
+                                            no units yet — add one first
+                                        </option>
+                                    ) : (
+                                        p.units.map((u) => (
+                                            <option key={u.id} value={u.id}>
+                                                unit {u.unit_number}
+                                                {u.status === 'occupied' ? ' (occupied)' : ''}
+                                            </option>
+                                        ))
+                                    )}
+                                </optgroup>
                             ))}
                         </select>
                     </FormField>

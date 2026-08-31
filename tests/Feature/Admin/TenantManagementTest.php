@@ -136,6 +136,26 @@ it('archives rather than deletes, so financial history survives', function () {
         ->and(Tenant::withTrashed()->count())->toBe(1);
 });
 
+it('suspends the portal account when a tenant is archived', function () {
+    $tenant = Tenant::factory()->create();
+    $user = User::factory()->tenant($tenant)->create();
+
+    $this->actingAs($this->admin)
+        ->delete("/admin/tenants/{$tenant->id}")
+        ->assertRedirect('/admin/tenants');
+
+    // `users` does not soft-delete alongside `tenants`, so without this the
+    // login outlives its own subject and the portal reads a null tenant on
+    // every page.
+    //
+    // canAuthenticate() is the exact predicate LoginRequest gates on, and
+    // LoginTest's "refuses a suspended account even with the right password"
+    // already proves the refusal end to end — this asserts the one new link in
+    // that chain: that archiving is what sets the status.
+    expect($user->fresh()->status)->toBe(User::STATUS_SUSPENDED)
+        ->and($user->fresh()->canAuthenticate())->toBeFalse();
+});
+
 it('refuses to archive a tenant with an active lease', function () {
     $tenant = Tenant::factory()->create();
     $unit = Unit::factory()->create();

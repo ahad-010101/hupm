@@ -7,8 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\LeaseRequest;
 use App\Models\HousingAuthority;
 use App\Models\Lease;
+use App\Models\Property;
 use App\Models\Tenant;
-use App\Models\Unit;
 use App\Support\BusinessCalendar;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -144,14 +144,22 @@ class LeaseController extends Controller
                 ->get(['id', 'first_name', 'last_name'])
                 ->map(fn ($t) => ['id' => $t->id, 'name' => $t->fullName()]),
 
-            'units' => Unit::query()
-                ->with('property:id,name')
-                ->orderBy('property_id')
-                ->get(['id', 'property_id', 'unit_number', 'status'])
-                ->map(fn ($u) => [
-                    'id' => $u->id,
-                    'label' => "{$u->property?->name} — unit {$u->unit_number}",
-                    'status' => $u->status,
+            // Grouped by property rather than a flat list of units, and ordered
+            // by NAME rather than property_id. A flat list ordered by insertion
+            // hides a newly added property twice over: at the bottom once it
+            // has a unit, and entirely until then, because a property with no
+            // units contributes no options at all. Sending the property even
+            // when it is empty lets the form say so instead of omitting it.
+            'properties' => Property::query()
+                ->with(['units' => fn ($q) => $q->orderBy('unit_number')])
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn ($p) => [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'units' => $p->units
+                        ->map(fn ($u) => $u->only(['id', 'unit_number', 'status']))
+                        ->all(),
                 ]),
 
             'authorities' => HousingAuthority::orderBy('name')->get(['id', 'name']),

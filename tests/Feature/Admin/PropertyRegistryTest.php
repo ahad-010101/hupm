@@ -148,9 +148,17 @@ it('rejects bathrooms with more precision than the column holds', function () {
         ->assertSessionHasErrors('bathrooms');
 });
 
-it('refuses to delete a property that still has units', function () {
+it('refuses to delete a property whose units have lease history', function () {
     $property = Property::factory()->create();
-    Unit::factory()->create(['property_id' => $property->id]);
+    $unit = Unit::factory()->create(['property_id' => $property->id]);
+    $tenant = Tenant::factory()->create();
+
+    DB::table('leases')->insert([
+        'unit_id' => $unit->id, 'tenant_id' => $tenant->id,
+        'start_date' => '2026-01-01', 'end_date' => '2026-12-31',
+        'total_contract_rent' => 900, 'tenant_portion' => 300, 'ha_portion' => 600,
+        'status' => 'ended', 'created_at' => now(), 'updated_at' => now(),
+    ]);
 
     $this->actingAs($this->admin)
         ->delete("/admin/properties/{$property->id}")
@@ -158,7 +166,8 @@ it('refuses to delete a property that still has units', function () {
 
     // RESTRICT would refuse this at the database anyway; checking first turns a
     // 500 into a sentence saying what to do.
-    expect(Property::find($property->id))->not->toBeNull();
+    expect(Property::find($property->id))->not->toBeNull()
+        ->and(Unit::find($unit->id))->not->toBeNull();
 });
 
 it('deletes a property with no units', function () {
@@ -169,6 +178,24 @@ it('deletes a property with no units', function () {
         ->assertRedirect('/admin/properties');
 
     expect(Property::find($property->id))->toBeNull()
+        ->and(DB::table('audit_logs')->where('action', 'property.deleted')->count())->toBe(1);
+});
+
+it('removes a property and its lease-free units together', function () {
+    $property = Property::factory()->create();
+    $units = Unit::factory()->count(2)->create(['property_id' => $property->id]);
+
+    // No lease anywhere, so no unit holds a financial record and clearing them
+    // by hand first would be busywork.
+    $this->actingAs($this->admin)
+        ->delete("/admin/properties/{$property->id}")
+        ->assertRedirect('/admin/properties');
+
+    expect(Property::find($property->id))->toBeNull()
+        ->and(Unit::whereIn('id', $units->pluck('id'))->count())->toBe(0)
+        // Each removal is audited separately, so the log reconstructs exactly
+        // what vanished rather than only naming the property.
+        ->and(DB::table('audit_logs')->where('action', 'unit.deleted')->count())->toBe(2)
         ->and(DB::table('audit_logs')->where('action', 'property.deleted')->count())->toBe(1);
 });
 

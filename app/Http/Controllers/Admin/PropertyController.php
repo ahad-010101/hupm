@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PropertyRequest;
+use App\Models\LedgerEntry;
 use App\Models\Property;
 use App\Support\AuditLogger;
 use App\Support\Counties;
@@ -67,17 +68,39 @@ class PropertyController extends Controller
 
     public function show(Property $property): Response
     {
-        $property->load(['units' => fn ($q) => $q->orderBy('unit_number')]);
+        $property->load(['units' => fn ($q) => $q->withCount('leases')->orderBy('unit_number')]);
+
+        // One grouped query for every unit on the page rather than one each.
+        // Read only — LedgerService remains the sole writer of ledger_entries
+        // (I-2).
+        $ledgerCounts = LedgerEntry::query()
+            ->join('leases', 'leases.id', '=', 'ledger_entries.lease_id')
+            ->whereIn('leases.unit_id', $property->units->pluck('id'))
+            ->groupBy('leases.unit_id')
+            ->selectRaw('leases.unit_id as unit_id, COUNT(*) as total')
+            ->pluck('total', 'unit_id')
+            // Both sides cast: a driver that hands back string keys would make
+            // every lookup below miss silently.
+            ->mapWithKeys(fn ($total, $unitId) => [(int) $unitId => (int) $total]);
 
         return Inertia::render('Admin/Properties/Show', [
             'property' => $property,
             'units' => $property->units->map(fn ($unit) => [
                 ...$unit->only(['id', 'unit_number', 'bedrooms', 'bathrooms', 'status']),
                 // Computed here rather than in the view: whether a unit may be
-                // removed is a data question, and the answer decides whether
-                // the button renders at all.
-                'is_deletable' => $unit->isDeletable(),
+                // removed is a data question, and the answer decides what the
+                // action says as much as whether it fires. The counts travel
+                // with it so the refusal can name what is in the way instead of
+                // leaving the admin to guess.
+                'is_deletable' => (int) $unit->leases_count === 0,
+                'lease_count' => (int) $unit->leases_count,
+                'ledger_count' => $ledgerCounts->get($unit->id, 0),
             ]),
+            'deletion' => [
+                'allowed' => $property->units->every(fn ($unit) => (int) $unit->leases_count === 0),
+                'unit_count' => $property->units->count(),
+                'blocking_units' => $property->units->filter(fn ($unit) => (int) $unit->leases_count > 0)->count(),
+            ],
         ]);
     }
 
@@ -149,17 +172,36 @@ class PropertyController extends Controller
         // The database would refuse this anyway (RESTRICT), but a foreign-key
         // violation surfaces as a 500 the admin cannot act on. Checking first
         // turns it into a sentence that says what to do next.
-        if (! $property->isDeletable()) {
+        $blocking = $property->unitsWithHistory();
+
+        if ($blocking > 0) {
             return back()->withErrors([
-                'property' => 'This property still has units. Remove or reassign them first.',
+                'property' => $blocking === 1
+                    ? 'One unit at this property has lease history, so the property cannot be removed. Financial history is kept permanently.'
+                    : "{$blocking} units at this property have lease history, so the property cannot be removed. Financial history is kept permanently.",
             ]);
         }
 
-        $audit->record('property.deleted', $property, $property->only(['name', 'street_address', 'postal_code']));
-        $property->delete();
+        $units = $property->units()->get();
+
+        // Every remaining unit is lease-free, so none of them holds a financial
+        // record and they go with the property in one act rather than making
+        // the admin clear them by hand first. Each is audited separately so the
+        // log can still reconstruct exactly what was removed.
+        DB::transaction(function () use ($property, $units, $audit) {
+            foreach ($units as $unit) {
+                $audit->record('unit.deleted', $unit, $unit->only(['property_id', 'unit_number']));
+                $unit->delete();
+            }
+
+            $audit->record('property.deleted', $property, $property->only(['name', 'street_address', 'postal_code']));
+            $property->delete();
+        });
 
         return redirect()
             ->route('admin.properties.index')
-            ->with('status', 'Property removed.');
+            ->with('status', $units->isEmpty()
+                ? 'Property removed.'
+                : 'Property removed, along with its '.$units->count().' '.($units->count() === 1 ? 'unit' : 'units').'.');
     }
 }
