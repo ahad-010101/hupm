@@ -343,3 +343,91 @@ it('AC-REG-01 offers a property with no units on the lease form, ordered by name
                 ->and($ids->search($empty->id))->toBeLessThan($ids->search($stocked->id));
         });
 });
+
+/*
+|--------------------------------------------------------------------------
+| List ordering and column sorting  [WP-38]
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Leases have no factory and the model is fully guarded, so build them the way
+ * the rest of the suite does. Each gets its own unit: D-03 permits one active
+ * lease per unit and the database enforces it.
+ */
+function sortableLease(array $overrides = []): Lease
+{
+    $lease = new Lease;
+    $lease->forceFill(array_merge([
+        'unit_id' => Unit::factory()->create()->id,
+        'tenant_id' => Tenant::factory()->create()->id,
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-12-31',
+        'total_contract_rent' => '900.00',
+        'tenant_portion' => '900.00',
+        'ha_portion' => '0.00',
+        'rent_due_day' => 1,
+        'grace_period_days' => 5,
+        'status' => 'active',
+    ], $overrides))->save();
+
+    return $lease;
+}
+
+it('WP-38 lists leases newest-added first by default', function () {
+    $older = sortableLease(['created_at' => now()->subDays(3)]);
+    $newer = sortableLease(['created_at' => now()->subDay()]);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/leases')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Admin/Leases/Index')
+            ->where('sort.key', 'created_at')
+            ->where('sort.direction', 'desc')
+            ->where('leases.data.0.id', $newer->id)
+            ->where('leases.data.1.id', $older->id));
+});
+
+it('WP-38 orders lease status by a curated precedence, not alphabetically', function () {
+    // Alphabetically these run active, draft, ended — so a plain descending
+    // string sort buries every live lease beneath the dead ones, which is what
+    // this replaces.
+    $ended = sortableLease(['status' => 'ended']);
+    $active = sortableLease(['status' => 'active']);
+    $draft = sortableLease(['status' => 'draft']);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/leases?sort=status&direction=asc')
+        ->assertInertia(fn ($page) => $page
+            ->where('leases.data.0.id', $active->id)
+            ->where('leases.data.1.id', $draft->id)
+            ->where('leases.data.2.id', $ended->id));
+
+    $this->actingAs($this->admin)
+        ->get('/admin/leases?sort=status&direction=desc')
+        ->assertInertia(fn ($page) => $page->where('leases.data.0.id', $ended->id));
+});
+
+it('WP-38 sorts leases by tenant surname without disturbing the eager loads', function () {
+    $zephyr = sortableLease(['tenant_id' => Tenant::factory()->create(['last_name' => 'Zephyr'])->id]);
+    $abbott = sortableLease(['tenant_id' => Tenant::factory()->create(['last_name' => 'Abbott'])->id]);
+
+    // The correlated subquery must not break the `with()` that populates these
+    // names in the first place — asserting on the rendered name proves both.
+    $this->actingAs($this->admin)
+        ->get('/admin/leases?sort=tenant&direction=asc')
+        ->assertInertia(fn ($page) => $page
+            ->where('leases.data.0.id', $abbott->id)
+            ->where('leases.data.1.id', $zephyr->id)
+            ->where('leases.data.0.tenant', fn ($name) => str_contains($name, 'Abbott')));
+});
+
+it('WP-38 falls back to the default when a lease sort key is not whitelisted', function () {
+    sortableLease();
+
+    $this->actingAs($this->admin)
+        ->get('/admin/leases?sort='.urlencode('status; drop table leases--'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('sort.key', 'created_at'));
+});

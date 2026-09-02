@@ -8,6 +8,7 @@ use App\Models\LedgerEntry;
 use App\Models\Property;
 use App\Support\AuditLogger;
 use App\Support\Counties;
+use App\Support\ListSort;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,9 +23,29 @@ use Inertia\Response;
  */
 class PropertyController extends Controller
 {
+    /**
+     * Sortable columns.  [WP-38]
+     *
+     * `units_count` is the alias `withCount` already adds below, so ordering by
+     * it needs no extra query.
+     *
+     * @var array<string, string>
+     */
+    private const SORTABLE = [
+        'created_at' => 'created_at',
+        'name' => 'name',
+        'city' => 'city',
+        'county' => 'county',
+        'units_count' => 'units_count',
+    ];
+
     public function index(Request $request): Response
     {
-        $properties = Property::query()
+        // Newest first, so a property added a moment ago is the first thing on
+        // the screen rather than sitting alphabetically in the middle of 25.
+        $sort = ListSort::resolve($request, self::SORTABLE, default: 'created_at');
+
+        $query = Property::query()
             ->withCount([
                 'units',
                 'units as occupied_units_count' => fn ($q) => $q->where('status', 'occupied'),
@@ -36,14 +57,16 @@ class PropertyController extends Controller
                     ->orWhere('street_address', 'like', "%{$search}%")
                     ->orWhere('city', 'like', "%{$search}%")
                     ->orWhere('postal_code', 'like', "%{$search}%"));
-            })
-            ->orderBy('name')
+            });
+
+        $properties = ListSort::apply($query, $sort, self::SORTABLE)
             ->paginate(25)
             ->withQueryString();
 
         return Inertia::render('Admin/Properties/Index', [
             'properties' => $properties,
             'filters' => ['search' => $request->string('search')->value()],
+            'sort' => $sort,
         ]);
     }
 

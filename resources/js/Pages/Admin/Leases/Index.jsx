@@ -7,17 +7,21 @@ import Alert from '@/Components/Alert';
 import Money from '@/Components/Money';
 
 /** Leases list.  [FR-REG-02] */
-export default function Index({ leases, filters = {}, flash = {} }) {
-    const setStatus = (status) =>
-        router.get('/admin/leases', { ...filters, status: status || undefined }, {
-            preserveState: true,
-            replace: true,
-        });
+export default function Index({ leases, filters = {}, sort, flash = {} }) {
+    const reload = (params = {}) =>
+        router.get(
+            '/admin/leases',
+            { ...filters, sort: sort?.key, direction: sort?.direction, ...params },
+            { preserveState: true, preserveScroll: true, replace: true },
+        );
+
+    const setStatus = (status) => reload({ status: status || undefined });
 
     const columns = [
         {
             key: 'tenant',
             header: 'Tenant',
+            sortable: true,
             render: (l) => (
                 <Link
                     href={`/admin/leases/${l.id}/edit`}
@@ -28,11 +32,30 @@ export default function Index({ leases, filters = {}, flash = {} }) {
             ),
         },
         { key: 'unit', header: 'Unit', render: (l) => `${l.property} — ${l.unit}` },
-        { key: 'term', header: 'Term', hideOnMobile: true, render: (l) => `${l.start_date} to ${l.end_date}` },
+        {
+            key: 'term',
+            header: 'Term',
+            hideOnMobile: true,
+            // The cell shows both ends of the term; ordering follows the start.
+            sortable: true,
+            sortKey: 'start_date',
+            sortLabels: { desc: 'Term start, latest first', asc: 'Term start, earliest first' },
+            render: (l) => `${l.start_date} to ${l.end_date}`,
+        },
+        {
+            key: 'added',
+            header: 'Added',
+            hideOnMobile: true,
+            sortable: true,
+            sortKey: 'created_at',
+            sortLabels: { desc: 'Added, newest first', asc: 'Added, oldest first' },
+            render: (l) => l.created_at ?? '—',
+        },
         {
             key: 'tenant_portion',
             header: 'Tenant portion',
             align: 'right',
+            sortable: true,
             render: (l) => (
                 <span>
                     <Money value={l.tenant_portion} />
@@ -44,7 +67,16 @@ export default function Index({ leases, filters = {}, flash = {} }) {
                 </span>
             ),
         },
-        { key: 'status', header: 'Status', align: 'right', render: (l) => <StatusBadge status={l.status} /> },
+        {
+            key: 'status',
+            header: 'Status',
+            align: 'right',
+            // Ordered by a curated precedence server-side (active, draft,
+            // ended), not alphabetically — see LeaseController::sortable().
+            sortable: true,
+            sortLabels: { asc: 'Status, active first', desc: 'Status, ended first' },
+            render: (l) => <StatusBadge status={l.status} />,
+        },
     ];
 
     return (
@@ -89,6 +121,8 @@ export default function Index({ leases, filters = {}, flash = {} }) {
                 columns={columns}
                 rows={leases.data}
                 caption="Leases"
+                sort={sort}
+                onSort={(key, direction) => reload({ sort: key, direction })}
                 empty={<EmptyState title="No leases match." description="Try a different status filter." />}
             />
 
