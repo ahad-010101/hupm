@@ -7,20 +7,32 @@ import StatusBadge from '@/Components/StatusBadge';
 import Alert from '@/Components/Alert';
 
 /** Properties list.  [FR-REG-01, UI §3.10] */
-export default function Index({ properties, filters = {}, flash = {} }) {
+export default function Index({ properties, filters = {}, sort, flash = {} }) {
     const [search, setSearch] = useState(filters.search ?? '');
+
+    // Sorting and searching are the same round trip, so they share one reload
+    // and neither can drop the other's parameter.
+    const reload = (params = {}) =>
+        router.get(
+            '/admin/properties',
+            { search, sort: sort?.key, direction: sort?.direction, ...params },
+            // preserveScroll: without it a sort click throws the viewport back
+            // to the top, which is exactly where you are not looking.
+            { preserveState: true, preserveScroll: true, replace: true },
+        );
 
     const submitSearch = (e) => {
         e.preventDefault();
         // Server-side filtering, not client-side: the portfolio is 25 today but
         // the list must not depend on shipping every row to the browser.
-        router.get('/admin/properties', { search }, { preserveState: true, replace: true });
+        reload();
     };
 
     const columns = [
         {
             key: 'name',
             header: 'Property',
+            sortable: true,
             render: (row) => (
                 <Link
                     href={`/admin/properties/${row.id}`}
@@ -33,15 +45,29 @@ export default function Index({ properties, filters = {}, flash = {} }) {
         {
             key: 'address',
             header: 'Address',
+            // The cell is five fields joined; city is the part worth ordering by.
+            sortable: true,
+            sortKey: 'city',
             render: (row) =>
                 [row.street_address, row.address_line_2, row.city, `${row.state} ${row.postal_code}`.trim(), row.country_code === 'US' ? null : row.country_code]
                     .filter(Boolean).join(', '),
         },
-        { key: 'county', header: 'County', hideOnMobile: true, render: (row) => row.county ?? '—' },
+        { key: 'county', header: 'County', hideOnMobile: true, sortable: true, render: (row) => row.county ?? '—' },
+        {
+            key: 'added',
+            header: 'Added',
+            hideOnMobile: true,
+            sortable: true,
+            sortKey: 'created_at',
+            sortLabels: { desc: 'Added, newest first', asc: 'Added, oldest first' },
+            render: (row) => (row.created_at ?? '').slice(0, 10),
+        },
         {
             key: 'units',
             header: 'Units',
             align: 'right',
+            sortable: true,
+            sortKey: 'units_count',
             render: (row) =>
                 row.units_count === 0 ? (
                     <span className="text-gray-600">None</span>
@@ -98,6 +124,8 @@ export default function Index({ properties, filters = {}, flash = {} }) {
                 columns={columns}
                 rows={properties.data}
                 caption="Properties"
+                sort={sort}
+                onSort={(key, direction) => reload({ sort: key, direction })}
                 empty={
                     <EmptyState
                         title={filters.search ? 'No properties match that search.' : 'No properties yet.'}

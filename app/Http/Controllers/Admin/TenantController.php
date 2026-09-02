@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\TenantRequest;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\AuditLogger;
+use App\Support\ListSort;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,9 +20,34 @@ use Inertia\Response;
  */
 class TenantController extends Controller
 {
+    /**
+     * Sortable columns.  [WP-38]
+     *
+     * `account_status` and `unit` are deliberately absent: both are resolved
+     * per row through relations in the `through()` closure below, so ordering
+     * by them would mean a join that changes what the page costs. They stay
+     * inert headers rather than pretending to sort.
+     *
+     * @var array<string, string|\Closure>
+     */
+    private const SORTABLE = [
+        'created_at' => 'created_at',
+        // Surname first, then forename — one visible "Name" column, two columns
+        // underneath it, which is how a name actually sorts.
+        'name' => null,
+        'email' => 'email',
+        'status' => 'status',
+    ];
+
     public function index(Request $request): Response
     {
-        $tenants = Tenant::query()
+        $sortable = [...self::SORTABLE, 'name' => fn ($q, string $d) => $q->orderBy('last_name', $d)->orderBy('first_name', $d)];
+
+        // Newest first: a tenant added a moment ago should not land in the
+        // middle of the alphabet where nobody looks for them.
+        $sort = ListSort::resolve($request, $sortable, default: 'created_at');
+
+        $query = Tenant::query()
             ->with(['users:id,tenant_id,status', 'leases' => fn ($q) => $q->where('status', 'active')->with('unit.property:id,name')])
             ->when($request->string('search')->trim()->value(), function ($query, string $search) {
                 $query->where(fn ($q) => $q
@@ -30,9 +56,9 @@ class TenantController extends Controller
                     ->orWhere('email', 'like', "%{$search}%")
                     ->orWhere('phone', 'like', "%{$search}%"));
             })
-            ->when($request->string('status')->value(), fn ($q, $s) => $q->where('status', $s))
-            ->orderBy('last_name')
-            ->orderBy('first_name')
+            ->when($request->string('status')->value(), fn ($q, $s) => $q->where('status', $s));
+
+        $tenants = ListSort::apply($query, $sort, $sortable)
             ->paginate(25)
             ->withQueryString()
             ->through(fn (Tenant $tenant) => [
@@ -47,11 +73,15 @@ class TenantController extends Controller
                 'contactable' => $tenant->isContactable(),
                 'account_status' => $tenant->users->first()?->status,
                 'unit' => $tenant->leases->first()?->unit?->property?->name,
+                // The list defaults to newest-first, so the date it sorts by has
+                // to be visible or the order looks arbitrary (WP-38).
+                'created_at' => $tenant->created_at?->toDateString(),
             ]);
 
         return Inertia::render('Admin/Tenants/Index', [
             'tenants' => $tenants,
             'filters' => $request->only(['search', 'status']),
+            'sort' => $sort,
         ]);
     }
 

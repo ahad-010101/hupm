@@ -206,3 +206,61 @@ it('keeps non-admins out of tenant records', function (string $role) {
     $this->actingAs($user)->get("/admin/tenants/{$tenant->id}")->assertForbidden();
     $this->actingAs($user)->post("/admin/tenants/{$tenant->id}/invite")->assertForbidden();
 })->with(['tenant', 'owner']);
+
+/*
+|--------------------------------------------------------------------------
+| List ordering and column sorting  [WP-38]
+|--------------------------------------------------------------------------
+*/
+
+it('WP-38 lists tenants newest-added first by default', function () {
+    // Surnames run the opposite way to the timestamps, so alphabetical order
+    // cannot masquerade as newest-first.
+    $oldest = Tenant::factory()->create(['last_name' => 'Abbott', 'created_at' => now()->subDays(3)]);
+    $newest = Tenant::factory()->create(['last_name' => 'Zimmerman', 'created_at' => now()->subDay()]);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/tenants')
+        ->assertInertia(fn ($page) => $page
+            ->where('sort.key', 'created_at')
+            ->where('sort.direction', 'desc')
+            ->where('tenants.data.0.id', $newest->id)
+            ->where('tenants.data.1.id', $oldest->id));
+});
+
+it('WP-38 sorts tenants by surname then forename', function () {
+    Tenant::factory()->create(['first_name' => 'Bianca', 'last_name' => 'Adams', 'created_at' => now()->subDay()]);
+    Tenant::factory()->create(['first_name' => 'Adam', 'last_name' => 'Adams', 'created_at' => now()->subDays(2)]);
+    Tenant::factory()->create(['first_name' => 'Carla', 'last_name' => 'Zephyr', 'created_at' => now()->subDays(3)]);
+
+    // One visible "Tenant" column, two columns underneath it — Adam sorts
+    // before Bianca within the shared surname.
+    $this->actingAs($this->admin)
+        ->get('/admin/tenants?sort=name&direction=asc')
+        ->assertInertia(fn ($page) => $page
+            ->where('tenants.data.0.name', 'Adam Adams')
+            ->where('tenants.data.1.name', 'Bianca Adams')
+            ->where('tenants.data.2.name', 'Carla Zephyr'));
+});
+
+it('WP-38 falls back to the default when a tenant sort key is not whitelisted', function (string $key) {
+    Tenant::factory()->create();
+
+    // `unit` and `account_status` are rendered through relations, so they are
+    // deliberately absent from the whitelist rather than silently half-working.
+    $this->actingAs($this->admin)
+        ->get('/admin/tenants?sort='.$key)
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('sort.key', 'created_at'));
+})->with(['unit', 'account_status', 'phone', 'nonsense']);
+
+it('WP-38 keeps the status filter when sorting', function () {
+    Tenant::factory()->create(['status' => 'active']);
+    Tenant::factory()->create(['status' => 'former']);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/tenants?status=active&sort=email&direction=asc')
+        ->assertInertia(fn ($page) => $page
+            ->has('tenants.data', 1)
+            ->where('sort.key', 'email'));
+});

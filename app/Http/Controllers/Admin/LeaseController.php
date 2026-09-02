@@ -10,6 +10,7 @@ use App\Models\Lease;
 use App\Models\Property;
 use App\Models\Tenant;
 use App\Support\BusinessCalendar;
+use App\Support\ListSort;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,18 +24,53 @@ class LeaseController extends Controller
 {
     public function __construct(private readonly LeaseService $leases) {}
 
+    /**
+     * Sortable columns.  [WP-38]
+     *
+     * @return array<string, string|\Closure>
+     */
+    private function sortable(): array
+    {
+        return [
+            'created_at' => 'created_at',
+            // A correlated subquery rather than a join: joining `tenants` here
+            // would collide with the eager loads below and quietly change what
+            // `through()` receives.
+            'tenant' => fn ($q, string $d) => $q->orderBy(
+                Tenant::select('last_name')->whereColumn('tenants.id', 'leases.tenant_id'),
+                $d,
+            ),
+            'start_date' => 'start_date',
+            'end_date' => 'end_date',
+            'tenant_portion' => 'tenant_portion',
+            // A curated precedence, not the column. `status` is an enum stored
+            // as a string, so ordering by it sorts alphabetically — descending
+            // that reads ended, draft, active, which buries every live lease
+            // beneath the dead ones. Same pattern as SignatureController.
+            'status' => fn ($q, string $d) => $q->orderByRaw(
+                "FIELD(status, 'active', 'draft', 'ended') ".($d === 'asc' ? 'asc' : 'desc'),
+            ),
+        ];
+    }
+
     public function index(Request $request): Response
     {
-        $leases = Lease::query()
+        $sortable = $this->sortable();
+
+        // Newest first (WP-38). The previous default sorted by the status
+        // string, which put all 27 active leases last.
+        $sort = ListSort::resolve($request, $sortable, default: 'created_at');
+
+        $query = Lease::query()
             ->with(['tenant:id,first_name,last_name', 'unit.property:id,name'])
             ->when($request->string('status')->value(), fn ($q, $s) => $q->where('status', $s))
             ->when($request->string('search')->trim()->value(), function ($query, string $search) {
                 $query->whereHas('tenant', fn ($q) => $q
                     ->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%"));
-            })
-            ->orderByDesc('status')
-            ->orderByDesc('start_date')
+            });
+
+        $leases = ListSort::apply($query, $sort, $sortable)
             ->paginate(25)
             ->withQueryString()
             ->through(fn (Lease $lease) => [
@@ -48,11 +84,15 @@ class LeaseController extends Controller
                 'total_contract_rent' => (string) $lease->total_contract_rent,
                 'tenant_portion' => (string) $lease->tenant_portion,
                 'is_subsidised' => $lease->is_subsidised,
+                // The list defaults to newest-first, so the date it sorts by has
+                // to be visible or the order looks arbitrary (WP-38).
+                'created_at' => $lease->created_at?->toDateString(),
             ]);
 
         return Inertia::render('Admin/Leases/Index', [
             'leases' => $leases,
             'filters' => $request->only(['search', 'status']),
+            'sort' => $sort,
         ]);
     }
 

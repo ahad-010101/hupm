@@ -109,6 +109,15 @@ export default function Show({ tenant, account, leases, flash = {}, errors = {} 
                         >
                             Edit details
                         </Link>
+                        {/* The ledger is where a manual balance is posted
+                            (FR-LED-04). Without this link it is reachable only
+                            by going to Ledger and finding the tenant again. */}
+                        <Link
+                            href={`/admin/ledger/${tenant.id}`}
+                            className="inline-flex min-h-touch items-center rounded-md border border-gray-300 px-4 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                        >
+                            View ledger
+                        </Link>
                         {/* Archiving is a soft delete: the ledger, the payments
                             and the tenancy all survive it. Only a live tenancy
                             blocks, and the sentence below says so. */}

@@ -7,18 +7,28 @@ import StatusBadge from '@/Components/StatusBadge';
 import Alert from '@/Components/Alert';
 
 /** Tenants list.  [FR-REG-02, Q-4] */
-export default function Index({ tenants, filters = {}, flash = {} }) {
+export default function Index({ tenants, filters = {}, sort, flash = {} }) {
     const [search, setSearch] = useState(filters.search ?? '');
+
+    // One reload for search, status and sort, so none of the three can drop
+    // another's parameter.
+    const reload = (params = {}) =>
+        router.get(
+            '/admin/tenants',
+            { search, status: filters.status, sort: sort?.key, direction: sort?.direction, ...params },
+            { preserveState: true, preserveScroll: true, replace: true },
+        );
 
     const submit = (e) => {
         e.preventDefault();
-        router.get('/admin/tenants', { search, status: filters.status }, { preserveState: true, replace: true });
+        reload();
     };
 
     const columns = [
         {
             key: 'name',
             header: 'Tenant',
+            sortable: true,
             render: (t) => (
                 <Link
                     href={`/admin/tenants/${t.id}`}
@@ -31,6 +41,9 @@ export default function Index({ tenants, filters = {}, flash = {} }) {
         {
             key: 'contact',
             header: 'Contact',
+            // Sorts by email; a tenant with no address (Q-4) sorts last.
+            sortable: true,
+            sortKey: 'email',
             render: (t) =>
                 t.contactable ? (
                     <span>
@@ -58,7 +71,16 @@ export default function Index({ tenants, filters = {}, flash = {} }) {
                     <span className="text-sm text-gray-600">No account</span>
                 ),
         },
-        { key: 'status', header: 'Status', align: 'right', render: (t) => <StatusBadge status={t.status} /> },
+        {
+            key: 'added',
+            header: 'Added',
+            hideOnMobile: true,
+            sortable: true,
+            sortKey: 'created_at',
+            sortLabels: { desc: 'Added, newest first', asc: 'Added, oldest first' },
+            render: (t) => t.created_at ?? '—',
+        },
+        { key: 'status', header: 'Status', align: 'right', sortable: true, render: (t) => <StatusBadge status={t.status} /> },
     ];
 
     return (
@@ -100,6 +122,8 @@ export default function Index({ tenants, filters = {}, flash = {} }) {
                 columns={columns}
                 rows={tenants.data}
                 caption="Tenants"
+                sort={sort}
+                onSort={(key, direction) => reload({ sort: key, direction })}
                 empty={<EmptyState title="No tenants match." description="Try a different name, email or phone number." />}
             />
 

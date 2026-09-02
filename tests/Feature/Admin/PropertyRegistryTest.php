@@ -265,3 +265,70 @@ it('keeps non-admins out of the registry entirely', function (string $role) {
 
     expect(Property::count())->toBe(1);
 })->with(['tenant', 'owner']);
+
+/*
+|--------------------------------------------------------------------------
+| List ordering and column sorting  [WP-38]
+|--------------------------------------------------------------------------
+*/
+
+it('WP-38 lists properties newest-added first by default', function () {
+    // Distinct timestamps, inserted in a deliberately unhelpful alphabetical
+    // order so "newest first" and "by name" cannot pass for one another.
+    $oldest = Property::factory()->create(['name' => 'Aardvark Place', 'created_at' => now()->subDays(3)]);
+    $middle = Property::factory()->create(['name' => 'Mulberry Way', 'created_at' => now()->subDays(2)]);
+    $newest = Property::factory()->create(['name' => 'Zebra Court', 'created_at' => now()->subDay()]);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/properties')
+        ->assertInertia(fn ($page) => $page
+            ->where('sort.key', 'created_at')
+            ->where('sort.direction', 'desc')
+            ->where('properties.data.0.id', $newest->id)
+            ->where('properties.data.1.id', $middle->id)
+            ->where('properties.data.2.id', $oldest->id));
+});
+
+it('WP-38 sorts properties by a whitelisted column in either direction', function () {
+    Property::factory()->create(['name' => 'Aardvark Place', 'created_at' => now()->subDay()]);
+    Property::factory()->create(['name' => 'Zebra Court', 'created_at' => now()->subDays(3)]);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/properties?sort=name&direction=asc')
+        ->assertInertia(fn ($page) => $page
+            ->where('sort.key', 'name')
+            ->where('properties.data.0.name', 'Aardvark Place'));
+
+    $this->actingAs($this->admin)
+        ->get('/admin/properties?sort=name&direction=desc')
+        ->assertInertia(fn ($page) => $page->where('properties.data.0.name', 'Zebra Court'));
+});
+
+it('WP-38 falls back to the default when the sort key is not whitelisted', function (string $query) {
+    Property::factory()->create();
+
+    // A stale bookmark or a hand-edited URL shows the list, never a 500 — and
+    // the key never reaches orderBy, which is what makes it injection-proof.
+    $this->actingAs($this->admin)
+        ->get('/admin/properties?'.$query)
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('sort.key', 'created_at'));
+})->with([
+    'unknown column' => 'sort=nonsense',
+    'a real column that is not whitelisted' => 'sort=notes',
+    'an injection attempt' => 'sort='.urlencode('name; drop table properties--'),
+    'empty' => 'sort=',
+]);
+
+it('WP-38 keeps the sort when searching, and the search when sorting', function () {
+    Property::factory()->create(['name' => 'Peachtree House', 'city' => 'Atlanta']);
+    Property::factory()->create(['name' => 'Peachtree Lodge', 'city' => 'Atlanta']);
+    Property::factory()->create(['name' => 'Elm Court', 'city' => 'Decatur']);
+
+    $this->actingAs($this->admin)
+        ->get('/admin/properties?search=Peachtree&sort=name&direction=desc')
+        ->assertInertia(fn ($page) => $page
+            ->has('properties.data', 2)
+            ->where('sort.key', 'name')
+            ->where('properties.data.0.name', 'Peachtree Lodge'));
+});
