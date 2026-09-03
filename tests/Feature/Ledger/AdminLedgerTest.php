@@ -105,7 +105,8 @@ it('interleaves both payers with a per-payer running balance', function () {
 it('AC-LED-07 rejects an adjustment with no reason and posts nothing', function () {
     $this->actingAs($this->admin)
         ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
-            'payer' => 'tenant', 'amount' => '25.00', 'description' => 'Something', 'reason' => '',
+            'payer' => 'tenant', 'direction' => 'add', 'amount' => '25.00',
+            'description' => 'Something', 'reason' => '',
         ])
         ->assertSessionHasErrors('reason');
 
@@ -115,7 +116,7 @@ it('AC-LED-07 rejects an adjustment with no reason and posts nothing', function 
 it('AC-LED-07 posts an adjustment when a reason is given', function () {
     $this->actingAs($this->admin)
         ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
-            'payer' => 'tenant', 'amount' => '-25.00',
+            'payer' => 'tenant', 'direction' => 'reduce', 'amount' => '25.00',
             'description' => 'Goodwill credit', 'reason' => 'Heating outage over a weekend',
         ])
         ->assertSessionHasNoErrors();
@@ -123,6 +124,8 @@ it('AC-LED-07 posts an adjustment when a reason is given', function () {
     $entry = LedgerEntry::first();
 
     expect($entry->type)->toBe('adjustment')
+        // The admin chose "reduce" and typed a positive figure; the sign is the
+        // controller's job now.
         ->and($entry->amount->toDecimalString())->toBe('-25.00')
         ->and($entry->reason)->toBe('Heating outage over a weekend')
         ->and(DB::table('audit_logs')->where('action', 'ledger.adjustment.posted')->count())->toBe(1);
@@ -131,10 +134,72 @@ it('AC-LED-07 posts an adjustment when a reason is given', function () {
 it('rejects a zero adjustment', function () {
     $this->actingAs($this->admin)
         ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
-            'payer' => 'tenant', 'amount' => '0.00',
+            'payer' => 'tenant', 'direction' => 'add', 'amount' => '0.00',
             'description' => 'Nothing', 'reason' => 'No reason at all',
         ])
         ->assertSessionHasErrors('amount');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Add / reduce replaces the signed amount  [FR-LED-04]
+|--------------------------------------------------------------------------
+*/
+
+it('derives the sign from the direction, so a positive figure can do either', function (string $direction, string $expected) {
+    $this->actingAs($this->admin)
+        ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
+            'payer' => 'tenant', 'direction' => $direction, 'amount' => '25.00',
+            'description' => 'Test', 'reason' => 'Verifying the direction is applied',
+        ])
+        ->assertSessionHasNoErrors();
+
+    expect(LedgerEntry::first()->amount->toDecimalString())->toBe($expected);
+})->with([
+    'add increases what the tenant owes' => ['add', '25.00'],
+    'reduce credits the tenant' => ['reduce', '-25.00'],
+]);
+
+it('requires a direction, and posts nothing without one', function (array $payload) {
+    // No default is offered in the form either: neither direction is the safe
+    // one to assume, and assuming one is how the wrong sign got posted.
+    $this->actingAs($this->admin)
+        ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
+            'payer' => 'tenant', 'amount' => '25.00',
+            'description' => 'Test', 'reason' => 'Missing the direction',
+            ...$payload,
+        ])
+        ->assertSessionHasErrors('direction');
+
+    expect(LedgerEntry::count())->toBe(0);
+})->with([
+    'omitted' => [[]],
+    'empty' => [['direction' => '']],
+    'not one of the two' => [['direction' => 'subtract']],
+]);
+
+it('refuses a signed amount now that the direction carries the sign', function () {
+    // Previously this posted a credit. Accepting it now would mean two ways to
+    // express the same thing, and "reduce" plus "-25.00" would cancel out.
+    $this->actingAs($this->admin)
+        ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
+            'payer' => 'tenant', 'direction' => 'reduce', 'amount' => '-25.00',
+            'description' => 'Goodwill credit', 'reason' => 'A negative should not be accepted',
+        ])
+        ->assertSessionHasErrors('amount');
+
+    expect(LedgerEntry::count())->toBe(0);
+});
+
+it('refuses an amount beyond the column ceiling rather than letting the database do it', function () {
+    $this->actingAs($this->admin)
+        ->post("/admin/ledger/{$this->tenant->id}/adjustments", [
+            'payer' => 'tenant', 'direction' => 'add', 'amount' => '100000000.00',
+            'description' => 'Fat finger', 'reason' => 'One digit too many',
+        ])
+        ->assertSessionHasErrors('amount');
+
+    expect(LedgerEntry::count())->toBe(0);
 });
 
 it('AC-LED-08 reverses through the UI and leaves both rows visible', function () {
@@ -196,7 +261,7 @@ it('refuses an adjustment for a tenant with no active lease', function () {
 
     $this->actingAs($this->admin)
         ->post("/admin/ledger/{$stranger->id}/adjustments", [
-            'payer' => 'tenant', 'amount' => '10.00',
+            'payer' => 'tenant', 'direction' => 'add', 'amount' => '10.00',
             'description' => 'X', 'reason' => 'A good reason',
         ])
         ->assertSessionHasErrors('amount');

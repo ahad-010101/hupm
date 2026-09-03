@@ -81,12 +81,22 @@ class LedgerController extends Controller
     {
         $validated = $request->validate([
             'payer' => ['required', 'in:tenant,housing_authority'],
-            'amount' => ['required', 'numeric', 'not_in:0', 'decimal:0,2'],
+            // The admin states an intention; this method works out the sign.
+            // Asking for a signed number made typing `25` where `-25` was meant
+            // post the exact opposite of what was intended, to a row that cannot
+            // be edited afterwards (I-3).
+            'direction' => ['required', 'in:add,reduce'],
+            // `gt:0` rather than `not_in:0`: a negative is now a mistake to be
+            // caught, not a convention to be honoured. `max` matches the
+            // DECIMAL(10,2) ceiling so an extra digit is a field-level message
+            // rather than a database error.
+            'amount' => ['required', 'numeric', 'gt:0', 'max:99999999.99', 'decimal:0,2'],
             'reason' => ['required', 'string', 'min:3', 'max:500'],
             'description' => ['required', 'string', 'max:255'],
         ], [
             'reason.required' => 'An adjustment needs a reason. It becomes part of the permanent record.',
-            'amount.not_in' => 'An adjustment of zero changes nothing.',
+            'direction.required' => 'Choose whether this adds to the balance or reduces it.',
+            'amount.gt' => 'Enter an amount greater than zero, and choose add or reduce above.',
         ]);
 
         $lease = $tenant->activeLease();
@@ -97,10 +107,19 @@ class LedgerController extends Controller
             ]);
         }
 
+        // Positive is a debit that increases what the tenant owes; negative is a
+        // credit. That convention still holds in the database — balances are a
+        // plain SUM (I-1) — it simply no longer surfaces in the form.
+        $amount = Money::fromString($validated['amount']);
+
+        if ($validated['direction'] === 'reduce') {
+            $amount = $amount->negate();
+        }
+
         $this->ledger->postAdjustment(
             $lease,
             $validated['payer'],
-            Money::fromString($validated['amount']),
+            $amount,
             $validated['reason'],
             $validated['description'],
         );
