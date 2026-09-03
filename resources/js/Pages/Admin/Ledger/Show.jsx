@@ -34,6 +34,8 @@ export default function Show({
     const reversal = useForm({ reason: '' });
     const adjustment = useForm({
         payer: 'tenant',
+        // Deliberately empty: the admin must choose add or reduce.
+        direction: '',
         amount: '',
         reason: '',
         description: '',
@@ -246,13 +248,34 @@ export default function Show({
                     </select>
                 </FormField>
 
+                {/* Asked before the amount, and with no option pre-selected.
+                    Neither direction is the safe one to default to, and a
+                    pre-filled choice is exactly how the wrong sign used to get
+                    posted. The labels say what happens to the tenant rather
+                    than what to type. */}
+                <FormField label="What should this do?" error={adjustment.errors.direction} required>
+                    <select
+                        value={adjustment.data.direction}
+                        onChange={(e) => adjustment.setData('direction', e.target.value)}
+                        required
+                        className="block w-full rounded-md border-gray-300 text-base shadow-sm focus:border-brand-600 focus:ring-brand-600"
+                    >
+                        <option value="">Choose…</option>
+                        <option value="add">Add to the balance — the tenant owes more</option>
+                        <option value="reduce">Reduce the balance — credit the tenant</option>
+                    </select>
+                </FormField>
+
                 <FormField
                     label="Amount"
                     value={adjustment.data.amount}
                     onChange={(e) => adjustment.setData('amount', e.target.value)}
                     error={adjustment.errors.amount}
+                    type="number"
                     inputMode="decimal"
-                    hint="Positive adds to the balance, negative credits it."
+                    min="0.01"
+                    step="0.01"
+                    hint="How much, as a positive figure — for example 25.00."
                     required
                 />
 
