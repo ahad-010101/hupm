@@ -39,6 +39,42 @@ class BalanceCalculator
     }
 
     /**
+     * What the tenant owes, ignoring the security deposit.  [WP-40, Q-12]
+     *
+     * Only Management Review uses this, and only to decide whether to *enter*
+     * it (BR-10). A deposit is money owed, so it belongs in `tenantBalance()`
+     * and on every screen — but it is not rent arrears, and triggering on it
+     * would be a trap rather than a policy: review suspends online payment
+     * (BR-11), so a tenant who owes only a deposit would be locked out of the
+     * one route available to pay it.
+     *
+     * A payment already allocated against the deposit still counts here, which
+     * is correct: it reduced what the tenant owes overall, and the ledger's job
+     * is to answer "how much is left", not "which dollar paid which charge".
+     */
+    public function arrearsBalance(int $tenantId): Money
+    {
+        return $this->sum($tenantId, 'tenant', excludeCategory: 'deposit');
+    }
+
+    /**
+     * The security deposit still outstanding.  [WP-40, Q-12]
+     *
+     * Charged less allocated, rather than a signed sum, because a deposit is
+     * paid by a payment scoped to it (`applies_to = deposit`) and never by a
+     * general one — so "what is left of this charge" is the question, and the
+     * allocations are where the answer lives.
+     */
+    public function depositBalance(int $tenantId): Money
+    {
+        $outstanding = $this->outstandingCharges($tenantId, 'tenant')
+            ->filter(fn ($charge) => $charge->category === 'deposit')
+            ->map(fn ($charge) => $charge->outstanding);
+
+        return Money::sum($outstanding->all());
+    }
+
+    /**
      * Every tenant's balance in one query.  [FR-ADM-01]
      *
      * The portfolio dashboard needs 26 balances at once, and 26 round trips to
@@ -248,12 +284,16 @@ class BalanceCalculator
         return Money::fromString((string) ($total ?: '0'))->absolute();
     }
 
-    private function sum(int $tenantId, string $payer): Money
+    private function sum(int $tenantId, string $payer, ?string $excludeCategory = null): Money
     {
         $total = DB::table('ledger_entries')
             ->where('tenant_id', $tenantId)
             ->where('payer', $payer)
             ->whereIn('status', LedgerService::BALANCE_AFFECTING)
+            // `category` is NOT NULL on every row, so a plain `!=` is total —
+            // no null-safe branch is needed and adding one would imply rows
+            // exist that do not.
+            ->when($excludeCategory, fn ($q, $category) => $q->where('category', '!=', $category))
             ->sum('amount');
 
         // MySQL returns DECIMAL as a string; keep it one all the way into Money

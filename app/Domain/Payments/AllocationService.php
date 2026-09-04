@@ -81,8 +81,24 @@ class AllocationService
             // computed per tenant (BR-03), so allocating per lease would let
             // the allocations disagree with the balance the moment a tenant
             // moved units mid-tenancy.
+            // [WP-40] Scoped by what the payment is FOR before the order is
+            // applied. The two scopes are disjoint: a `balance` payment cannot
+            // reach the security deposit and a `deposit` payment cannot reach
+            // the rent.
+            //
+            // This is what lets the deposit exist without disturbing anything.
+            // Under `oldest_charge_first` a deposit posted at lease start is
+            // older than the first rent charge, so an unscoped part payment
+            // would clear the deposit and leave the rent short — earning a late
+            // fee on the rent while the deposit sat paid. Scoping removes the
+            // competition rather than reordering it.
+            $allowed = Payment::SCOPE_CATEGORIES[$payment->applies_to]
+                ?? Payment::SCOPE_CATEGORIES[Payment::APPLIES_TO_BALANCE];
+
             $charges = $this->orders->current()->sort(
                 $this->balances->outstandingCharges($payment->tenant_id, $payment->payer)
+                    ->filter(fn ($charge) => in_array($charge->category, $allowed, true))
+                    ->values()
             );
 
             // A charge this payment has already touched is skipped even if its

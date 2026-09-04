@@ -2,10 +2,13 @@
 
 namespace App\Domain\Leases;
 
+use App\Domain\Ledger\LedgerService;
 use App\Models\Lease;
 use App\Models\Unit;
 use App\Support\AuditLogger;
 use App\Support\BusinessCalendar;
+use App\Support\Money;
+use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +26,8 @@ class LeaseService
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly BusinessCalendar $calendar,
+        private readonly LedgerService $ledger,
+        private readonly Settings $settings,
     ) {}
 
     /**
@@ -37,9 +42,56 @@ class LeaseService
 
             $this->syncUnitStatus($lease);
             $this->audit->record('lease.created', $lease, $attributes);
+            $this->postSecurityDeposit($lease);
 
             return $lease;
         });
+    }
+
+    /**
+     * Charge the security deposit to the tenant.  [WP-40, Q-12 closed 2026-09-04]
+     *
+     * Only on creation, and only while `deposits.tracked_in_ledger` is on. That
+     * gate is what makes "from now on, when new leases come" true: the 27
+     * leases already loaded carry deposits their tenants paid years ago, and
+     * posting those would invent debt for every one of them. Nothing is
+     * backfilled, and the switch stays off until the historical load is done.
+     *
+     * Not on `update()` either. A lease edited to correct a typo in the deposit
+     * figure must not raise a second charge, and an amendment is not a new
+     * tenancy.
+     *
+     * **`period` is deliberately NULL.** The late-fee engine reads
+     * `outstandingByPeriod()`, which requires a period — so a deposit is
+     * invisible to it and can never accrue a late fee. That is not an accident
+     * of the schema; it is the mechanism (I-7 is about payer, this is about
+     * what kind of debt earns a fee).
+     */
+    private function postSecurityDeposit(Lease $lease): void
+    {
+        if (! $this->settings->bool('deposits.tracked_in_ledger', false)) {
+            return;
+        }
+
+        $deposit = $lease->security_deposit;
+
+        if (! $deposit instanceof Money || ! $deposit->isPositive()) {
+            return;
+        }
+
+        $this->ledger->postCharge(
+            $lease,
+            'deposit',
+            // Never the housing authority. A deposit is the resident's, and
+            // the HA portion has nothing to do with it.
+            'tenant',
+            $deposit,
+            'Security deposit',
+            // Idempotent on the lease, so a retried transaction cannot charge
+            // a deposit twice (D-01).
+            "{$lease->id}:deposit",
+            $this->calendar->today(),
+        );
     }
 
     /** @param array<string, mixed> $attributes */

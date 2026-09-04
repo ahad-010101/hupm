@@ -55,11 +55,25 @@ export default function Pay({
     leaseId,
     cardsEnabled = false,
     cardConvenienceFee = '0.00',
+    depositDue = '0.00',
 }) {
-    const fullOnly = policy?.partial_payment_policy === 'full_only';
     const owed = toCents(balance) ?? 0;
+    const depositCents = toCents(depositDue) ?? 0;
 
-    const [amount, setAmount] = useState(owed > 0 ? balance : '');
+    // What is owed that is NOT the deposit. A balance payment can only settle
+    // these, so defaulting the field to the whole balance would overpay by the
+    // deposit and strand the difference as a credit.
+    const arrearsCents = Math.max(owed - depositCents, 0);
+
+    // [WP-40] The deposit is paid deliberately or not at all.
+    const [appliesTo, setAppliesTo] = useState('balance');
+    const payingDeposit = appliesTo === 'deposit';
+
+    // A `full_only` lease is a rule about rent. It has nothing to say about a
+    // deposit instalment, so it does not apply on that branch.
+    const fullOnly = policy?.partial_payment_policy === 'full_only' && ! payingDeposit;
+
+    const [amount, setAmount] = useState(arrearsCents > 0 ? fromCents(arrearsCents) : '');
     const [method, setMethod] = useState('echeck');
 
     // The fee is only ever added to a card payment, and only when one is set.
@@ -104,6 +118,7 @@ export default function Pay({
                 amount,
                 idempotency_key: idempotencyKey,
                 method,
+                applies_to: appliesTo,
             });
 
             setHandoff(data);
@@ -224,11 +239,72 @@ export default function Pay({
                                 </Alert>
                             )}
 
+                            {/* [WP-40] The deposit is its own decision. Only
+                                shown when one is outstanding — a resident with
+                                nothing to deposit sees the page exactly as it
+                                was before. */}
+                            {depositCents > 0 && (
+                                <fieldset className="mb-4">
+                                    <legend className="text-base font-medium text-gray-900">
+                                        What are you paying?
+                                    </legend>
+                                    <div className="mt-2 space-y-2">
+                                        {[
+                                            {
+                                                value: 'balance',
+                                                label: 'Rent and charges',
+                                                due: fromCents(arrearsCents),
+                                            },
+                                            {
+                                                value: 'deposit',
+                                                label: 'Security deposit',
+                                                due: depositDue,
+                                            },
+                                        ].map((option) => (
+                                            <label
+                                                key={option.value}
+                                                className="flex min-h-touch items-center gap-3 rounded-md border border-gray-300 px-3 py-2 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50"
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    name="applies_to"
+                                                    value={option.value}
+                                                    checked={appliesTo === option.value}
+                                                    onChange={() => {
+                                                        setAppliesTo(option.value);
+                                                        // The amount follows the
+                                                        // choice, so neither can
+                                                        // be paid by accident.
+                                                        setAmount(
+                                                            option.value === 'deposit'
+                                                                ? depositDue
+                                                                : fromCents(arrearsCents),
+                                                        );
+                                                    }}
+                                                    className="text-brand-600 focus:ring-brand-600"
+                                                />
+                                                <span className="text-base text-gray-900">{option.label}</span>
+                                                <span className="ml-auto text-base font-medium">
+                                                    <Money value={option.due} />
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="mt-2 text-sm text-gray-600">
+                                        These are kept separate. Paying your deposit does not affect
+                                        your rent, and paying your rent does not go towards the deposit.
+                                    </p>
+                                </fieldset>
+                            )}
+
                             {fullOnly ? (
                                 <div className="mb-4">
                                     <p className="text-base font-medium text-gray-900">Amount</p>
                                     <p className="mt-1 text-2xl">
-                                        <Money value={balance} />
+                                        {/* Arrears, not the whole balance — the
+                                            deposit is settled on its own branch
+                                            and cannot be paid from here. */}
+                                        <Money value={fromCents(arrearsCents)} />
                                     </p>
                                     <p className="mt-1 text-sm text-gray-600">
                                         This account pays the full balance. Contact the office if you
@@ -237,14 +313,16 @@ export default function Pay({
                                 </div>
                             ) : (
                                 <FormField
-                                    label="Amount to pay"
+                                    label={payingDeposit ? 'Deposit amount to pay' : 'Amount to pay'}
                                     value={amount}
                                     onChange={(e) => setAmount(e.target.value)}
                                     inputMode="decimal"
                                     hint={
-                                        policy?.minimum
-                                            ? `Part payments are accepted from $${policy.minimum} upwards.`
-                                            : 'You can pay the full balance or part of it.'
+                                        payingDeposit
+                                            ? 'You can pay the whole deposit or part of it. This does not go towards your rent.'
+                                            : policy?.minimum
+                                              ? `Part payments are accepted from $${policy.minimum} upwards.`
+                                              : 'You can pay the full balance or part of it.'
                                     }
                                     required
                                 />

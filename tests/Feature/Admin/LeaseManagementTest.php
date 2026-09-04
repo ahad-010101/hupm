@@ -1,11 +1,14 @@
 <?php
 
+use App\Domain\Ledger\BalanceCalculator;
 use App\Models\HousingAuthority;
 use App\Models\Lease;
+use App\Models\LedgerEntry;
 use App\Models\Property;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use App\Support\Settings;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -430,4 +433,71 @@ it('WP-38 falls back to the default when a lease sort key is not whitelisted', f
         ->get('/admin/leases?sort='.urlencode('status; drop table leases--'))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->where('sort.key', 'created_at'));
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Security deposit on the ledger  [WP-40, Q-12 closed 2026-09-04]
+ |--------------------------------------------------------------------------
+ |
+ | Off by default and never retrospective: the leases already loaded carry
+ | deposits their tenants paid years ago.
+ |
+ */
+
+it('AC-REG-08 adds the security deposit to the tenant balance on a new lease', function () {
+    app(Settings::class)->set('deposits.tracked_in_ledger', 'true');
+
+    $this->actingAs($this->admin)
+        ->post('/admin/leases', leasePayload(['security_deposit' => '900.00']))
+        ->assertSessionHasNoErrors();
+
+    $deposit = LedgerEntry::where('category', 'deposit')->sole();
+
+    expect($deposit->amount->toDecimalString())->toBe('900.00')
+        ->and($deposit->payer)->toBe('tenant')
+        // NULL period is the mechanism, not an oversight: the late-fee engine
+        // reads outstandingByPeriod(), which skips rows without one.
+        ->and($deposit->period)->toBeNull()
+        ->and(app(BalanceCalculator::class)->tenantBalance($this->tenant->id)->toDecimalString())
+        ->toBe('900.00');
+});
+
+it('AC-REG-08 adds nothing while the setting is off', function () {
+    // The shipped default, and the state the 27 loaded leases were created in.
+    $this->actingAs($this->admin)
+        ->post('/admin/leases', leasePayload(['security_deposit' => '900.00']))
+        ->assertSessionHasNoErrors();
+
+    expect(LedgerEntry::where('category', 'deposit')->count())->toBe(0)
+        ->and(app(BalanceCalculator::class)->tenantBalance($this->tenant->id)->toDecimalString())
+        ->toBe('0.00');
+});
+
+it('AC-REG-08 charges no deposit when the lease records none', function () {
+    app(Settings::class)->set('deposits.tracked_in_ledger', 'true');
+
+    $this->actingAs($this->admin)
+        ->post('/admin/leases', leasePayload(['security_deposit' => '0.00']))
+        ->assertSessionHasNoErrors();
+
+    expect(LedgerEntry::where('category', 'deposit')->count())->toBe(0);
+});
+
+it('AC-REG-08 does not charge a second deposit when the lease is edited', function () {
+    app(Settings::class)->set('deposits.tracked_in_ledger', 'true');
+
+    $this->actingAs($this->admin)->post('/admin/leases', leasePayload(['security_deposit' => '900.00']));
+
+    $lease = Lease::first();
+
+    // Correcting a typo in the deposit figure is an amendment, not a new
+    // tenancy, and must never raise a second charge.
+    $this->actingAs($this->admin)->patch("/admin/leases/{$lease->id}", leasePayload([
+        'security_deposit' => '950.00',
+        'lock_version' => $lease->lockVersion(),
+    ]));
+
+    expect(LedgerEntry::where('category', 'deposit')->count())->toBe(1)
+        ->and(LedgerEntry::where('category', 'deposit')->sole()->amount->toDecimalString())->toBe('900.00');
 });

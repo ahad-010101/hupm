@@ -49,6 +49,10 @@ class PaymentController extends Controller
         return Inertia::render('Portal/Pay', [
             // AC-LED-02 / I-4: the tenant portion. There is no other figure here.
             'balance' => $tenant ? (string) $this->balances->tenantBalance($tenant->id) : null,
+            // [WP-40] Shown and paid separately. A deposit is not rent, and
+            // rolling it into one figure is how a resident ends up paying it by
+            // accident while their rent falls short.
+            'depositDue' => $tenant ? (string) $this->balances->depositBalance($tenant->id) : null,
             'pending' => $tenant ? (string) $this->balances->pendingPayments($tenant->id) : null,
             // The slice of that the gateway has never heard of, so the
             // screen can say "we have no confirmation" rather than
@@ -87,6 +91,7 @@ class PaymentController extends Controller
                 returnUrl: route('portal.pay.confirm'),
                 cancelUrl: route('portal.pay.confirm', ['cancelled' => 1]),
                 method: $request->string('method')->value() ?: Payment::METHOD_ECHECK,
+                appliesTo: $request->string('applies_to')->value() ?: Payment::APPLIES_TO_BALANCE,
             );
         } catch (GatewayUnavailableException $e) {
             // The tenant gets a soft, non-alarming message; the log gets the

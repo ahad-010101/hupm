@@ -47,6 +47,11 @@ class CreatePaymentRequest extends BaseFormRequest
             // the same reasoning that keeps the amount rules in
             // PartialPaymentPolicy rather than here.
             'method' => ['sometimes', Rule::in([Payment::METHOD_ECHECK, Payment::METHOD_CARD])],
+            // [WP-40] What the payment settles. Absent means the balance, which
+            // is what every payment meant before deposits were tracked.
+            'applies_to' => ['sometimes', Rule::in([
+                Payment::APPLIES_TO_BALANCE, Payment::APPLIES_TO_DEPOSIT,
+            ])],
         ];
     }
 

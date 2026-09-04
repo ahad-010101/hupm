@@ -56,7 +56,7 @@ class SettingsSeeder extends Seeder
             ['roles.owner_enabled', 'false', 'bool', true,
                 'Q-11. Whether the owner role ships, and its scope (WP-28).'],
             ['deposits.tracked_in_ledger', 'false', 'bool', true,
-                'Q-12. Whether security deposits are a ledger liability or a lease field only.'],
+                'Q-12 (closed 2026-09-04, yes). Ships off. When on, a new lease charges its security deposit to the tenant (WP-40). Never retrospective.'],
 
             // ── Retention ───────────────────────────────────────────────────
             ['retention.notices_days', '0', 'int', true, 'Q-16. 0 = retain indefinitely.'],

@@ -47,6 +47,27 @@ class Payment extends Model
 
     public const METHOD_CARD = 'card';
 
+    /**
+     * What the payment is for.  [WP-40]
+     *
+     * Disjoint scopes: `balance` can never reach the security deposit and
+     * `deposit` can never reach the rent. See AllocationService.
+     */
+    public const APPLIES_TO_BALANCE = 'balance';
+
+    public const APPLIES_TO_DEPOSIT = 'deposit';
+
+    /** Charge categories a payment of each kind is allowed to settle. */
+    public const SCOPE_CATEGORIES = [
+        // Everything except the deposit. A rent payment behaves exactly as it
+        // did before deposits were tracked at all.
+        self::APPLIES_TO_BALANCE => ['rent', 'late_fee', 'returned_fee', 'utility', 'other', 'convenience_fee'],
+        // The deposit, plus the card fee this very payment incurred — that fee
+        // is posted at settlement and has to be payable by the payment that
+        // caused it, or it would strand as an overpayment.
+        self::APPLIES_TO_DEPOSIT => ['deposit', 'convenience_fee'],
+    ];
+
     /** Writes go through a domain service (I-11); nothing mass-assigns a payment. */
     protected $guarded = ['*'];
 

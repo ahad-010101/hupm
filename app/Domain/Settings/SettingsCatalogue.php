@@ -143,10 +143,15 @@ class SettingsCatalogue
             'deposits.tracked_in_ledger' => [
                 'group' => 'Money',
                 'label' => 'Security deposits on the ledger',
-                'help' => 'Whether a deposit is a liability on the resident ledger or just a figure on the lease.',
+                'help' => 'When on, creating a new lease with a security deposit adds that amount to '
+                    .'the resident\'s balance, so they can pay it online alongside their first month\'s '
+                    .'rent. A deposit never accrues a late fee and never puts an account into '
+                    .'Management Review. Leases created while this is off are unaffected, and nothing '
+                    .'is ever added retrospectively.',
                 'input' => 'bool',
-                'warning' => 'Turning this on changes what a resident balance means. Do not change it '
-                    .'once real balances are loaded without agreeing the treatment first.',
+                'warning' => 'Turn this on only once the existing leases are loaded. It applies to '
+                    .'leases created from that moment onwards — a lease entered for a tenancy whose '
+                    .'deposit was paid years ago would otherwise show it as owed.',
             ],
 
             /*
