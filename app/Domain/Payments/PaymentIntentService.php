@@ -73,6 +73,7 @@ class PaymentIntentService
         string $returnUrl,
         string $cancelUrl,
         string $method = Payment::METHOD_ECHECK,
+        string $appliesTo = Payment::APPLIES_TO_BALANCE,
     ): array {
         $this->guardDelinquency($lease);
 
@@ -99,13 +100,20 @@ class PaymentIntentService
             ];
         }
 
+        // [WP-40] The lease's partial-payment policy governs RENT. A security
+        // deposit is a different obligation, and a `full_only` lease must not
+        // refuse a deposit instalment on a rule written about the rent — that
+        // would be the policy answering a question it was never asked.
+        //
         // Evaluated on the RENT amount, never on the total (D-28). A
         // convenience fee must never turn a payment the lease would have
         // accepted into one it rejects.
-        $verdict = $this->policy->check($lease, $amount);
+        if ($appliesTo !== Payment::APPLIES_TO_DEPOSIT) {
+            $verdict = $this->policy->check($lease, $amount);
 
-        if (! $verdict['allowed']) {
-            throw ValidationException::withMessages(['amount' => $verdict['reason']]);
+            if (! $verdict['allowed']) {
+                throw ValidationException::withMessages(['amount' => $verdict['reason']]);
+            }
         }
 
         [$payment, $entry] = $this->recordIntent(
@@ -114,6 +122,7 @@ class PaymentIntentService
             $this->convenienceFee($method),
             $idempotencyKey,
             $method,
+            $appliesTo,
         );
 
         try {
@@ -209,8 +218,9 @@ class PaymentIntentService
         Money $fee,
         string $idempotencyKey,
         string $method,
+        string $appliesTo,
     ): array {
-        return DB::transaction(function () use ($lease, $amount, $fee, $idempotencyKey, $method) {
+        return DB::transaction(function () use ($lease, $amount, $fee, $idempotencyKey, $method, $appliesTo) {
             // [D-28] What the gateway will actually take. For eCheck the fee is
             // zero and this is the rent, exactly as before.
             $total = $amount->plus($fee);
@@ -220,6 +230,7 @@ class PaymentIntentService
                 'lease_id' => $lease->id,
                 'tenant_id' => $lease->tenant_id,
                 'payer' => 'tenant',
+                'applies_to' => $appliesTo,
                 'amount' => $total->toDecimalString(),
                 // NULL rather than 0.00 when there is no fee, so "this payment
                 // had no fee" and "this payment predates fees" read alike — the
@@ -240,9 +251,17 @@ class PaymentIntentService
                 $lease,
                 'tenant',
                 $total,
-                'Payment submitted online',
+                $appliesTo === Payment::APPLIES_TO_DEPOSIT
+                    ? 'Security deposit submitted online'
+                    : 'Payment submitted online',
                 $payment->id,
                 'pending',
+                postedOn: null,
+                reason: null,
+                // Categorised to match what it settles, so that excluding
+                // deposits from the arrears figure removes both sides of the
+                // pair rather than only the charge.
+                category: $appliesTo === Payment::APPLIES_TO_DEPOSIT ? 'deposit' : 'other',
             );
 
             $this->audit->record('payment.submitted', $payment, [

@@ -76,7 +76,13 @@ class DelinquencyService
 
         // The account balance, not a single period: BR-10 is about an account
         // carrying a balance, unlike the per-period fee rule.
-        if (! $this->balances->tenantBalance($lease->tenant_id)->isPositive()) {
+        //
+        // [WP-40, Q-12] Arrears rather than the whole balance — the security
+        // deposit is excluded. Review suspends online payment (BR-11), so
+        // triggering on an unpaid deposit would lock a tenant out of the only
+        // route they have to pay it: a trap, not a policy. Rent and fees
+        // trigger it exactly as before.
+        if (! $this->balances->arrearsBalance($lease->tenant_id)->isPositive()) {
             return false;
         }
 

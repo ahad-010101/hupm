@@ -120,6 +120,7 @@ class LedgerService
         string $status = 'pending',
         ?CarbonImmutable $postedOn = null,
         ?string $reason = null,
+        string $category = 'other',
     ): LedgerEntry {
         if (! $amount->isPositive()) {
             throw new InvalidArgumentException('Pass the amount paid as a positive value; the ledger stores it negative.');
@@ -127,7 +128,14 @@ class LedgerService
 
         return $this->write($lease, [
             'type' => 'payment',
-            'category' => 'other',
+            // [WP-40] `other` for a payment against the balance, which is every
+            // payment that existed before deposits were tracked. A payment
+            // scoped to the deposit carries `deposit` instead, so that a filter
+            // excluding deposits removes the charge AND the payment that
+            // settled it. Filtering only the charge leaves the payment behind
+            // and the arrears go negative by the deposit — which is exactly
+            // what happened the first time this was written.
+            'category' => $category,
             'payer' => $payer,
             'amount' => $amount->negate(),
             'status' => $status,

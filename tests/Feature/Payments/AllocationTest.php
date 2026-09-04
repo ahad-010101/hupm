@@ -79,14 +79,14 @@ function outstanding(
 }
 
 /** A settled payment with its cleared ledger entry, ready to allocate. */
-function settledPayment(string $amount, string $payer = 'tenant'): Payment
+function settledPayment(string $amount, string $payer = 'tenant', array $overrides = []): Payment
 {
-    $payment = Payment::factory()->settled()->create([
+    $payment = Payment::factory()->settled()->create(array_merge([
         'lease_id' => test()->lease->id,
         'tenant_id' => test()->tenant->id,
         'payer' => $payer,
         'amount' => $amount,
-    ]);
+    ], $overrides));
 
     $entry = test()->ledger->postPayment(
         test()->lease, $payer, Money::fromString($amount), 'Payment received', $payment->id,
@@ -419,4 +419,96 @@ it('ignores a charge that is already fully paid', function () {
 
     expect(appliedAmounts($second))->toBe([$february->id => '100.00'])
         ->and(PaymentAllocation::where('charge_entry_id', $january->id)->count())->toBe(1);
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Deposit payments are scoped  [WP-40, Q-12]
+ |--------------------------------------------------------------------------
+ |
+ | The two scopes are disjoint. This is what lets a security deposit exist
+ | without changing anything about how rent behaves: under the shipped
+ | `oldest_charge_first` a deposit posted at lease start is older than the
+ | first rent charge, so an unscoped part payment would clear the deposit and
+ | leave the rent short — earning a late fee on rent that was tendered.
+ |
+ */
+
+it('AC-PAY-22 pays only the deposit when the resident chose the deposit', function () {
+    $rent = $this->ledger->postCharge(
+        $this->lease, 'rent', 'tenant', Money::fromString('500.00'),
+        'Rent — February 2026', 'alloc:dep:rent', CarbonImmutable::parse('2026-02-01'), '2026-02',
+    );
+    // Posted FIRST, so oldest-charge-first would reach it first if unscoped.
+    $deposit = $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', 'alloc:dep:deposit', CarbonImmutable::parse('2026-01-01'),
+    );
+
+    $payment = settledPayment('300.00', 'tenant', ['applies_to' => 'deposit']);
+
+    app(AllocationService::class)->allocate($payment);
+
+    expect(PaymentAllocation::where('charge_entry_id', $deposit->id)->sum('amount'))->toEqual('300.00')
+        // The rent is untouched, so its late-fee clock is unaffected.
+        ->and(PaymentAllocation::where('charge_entry_id', $rent->id)->count())->toBe(0);
+});
+
+it('AC-PAY-22 never reaches the deposit when the resident is paying rent', function () {
+    $deposit = $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', 'alloc:bal:deposit', CarbonImmutable::parse('2026-01-01'),
+    );
+    $rent = $this->ledger->postCharge(
+        $this->lease, 'rent', 'tenant', Money::fromString('500.00'),
+        'Rent — February 2026', 'alloc:bal:rent', CarbonImmutable::parse('2026-02-01'), '2026-02',
+    );
+
+    // The default, and what every payment written before WP-40 meant.
+    $payment = settledPayment('500.00');
+
+    app(AllocationService::class)->allocate($payment);
+
+    expect(PaymentAllocation::where('charge_entry_id', $rent->id)->sum('amount'))->toEqual('500.00')
+        ->and(PaymentAllocation::where('charge_entry_id', $deposit->id)->count())->toBe(0);
+});
+
+it('AC-PAY-22 leaves the rent arrears untouched once the deposit is paid in full', function () {
+    // The regression this exists for: excluding `deposit` from the arrears
+    // figure removed the +900 CHARGE but not the −900 PAYMENT that settled it,
+    // so a tenant who paid their deposit showed arrears of −554.02 against
+    // rent of 345.98 — a credit they had not earned, on a screen that drives
+    // Management Review.
+    $this->ledger->postCharge(
+        $this->lease, 'rent', 'tenant', Money::fromString('345.98'),
+        'Rent — February 2026', 'alloc:pair:rent', CarbonImmutable::parse('2026-02-01'), '2026-02',
+    );
+    $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', 'alloc:pair:deposit', CarbonImmutable::parse('2026-01-01'),
+    );
+
+    $payment = Payment::factory()->settled()->create([
+        'lease_id' => $this->lease->id,
+        'tenant_id' => $this->tenant->id,
+        'payer' => 'tenant',
+        'applies_to' => 'deposit',
+        'amount' => '900.00',
+    ]);
+
+    $entry = $this->ledger->postPayment(
+        $this->lease, 'tenant', Money::fromString('900.00'), 'Security deposit submitted online',
+        $payment->id, 'pending', null, null, 'deposit',
+    );
+    $this->ledger->transitionStatus($entry, 'cleared');
+
+    app(AllocationService::class)->allocate($payment->refresh());
+
+    $balances = app(BalanceCalculator::class);
+
+    expect($balances->depositBalance($this->tenant->id)->toDecimalString())->toBe('0.00')
+        // Both sides of the deposit pair drop out together.
+        ->and($balances->arrearsBalance($this->tenant->id)->toDecimalString())->toBe('345.98')
+        // And the overall balance is still the truth: rent owed, deposit settled.
+        ->and($balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('345.98');
 });

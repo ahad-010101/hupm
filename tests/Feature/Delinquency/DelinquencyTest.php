@@ -536,3 +536,66 @@ it('evaluates the whole portfolio in one run', function () {
         ->and(DB::table('job_runs')->where('job_name', EvaluateDelinquency::class)->value('records_processed'))
         ->toBe(2);
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | Security deposits do not make an account delinquent  [WP-40, Q-12]
+ |--------------------------------------------------------------------------
+ */
+
+it('AC-DEL-09 does not enter review for an unpaid security deposit alone', function () {
+    Carbon::setTestNow('2026-02-10 02:30:00');
+
+    // Rent for the period is settled; only the deposit is outstanding.
+    $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', "{$this->lease->id}:deposit", CarbonImmutable::parse('2026-02-01'),
+    );
+
+    expect($this->delinquency->shouldEnterReview($this->lease))->toBeFalse()
+        // The deposit is still owed and still visible — it is simply not
+        // arrears. Excluding it from the balance would be a lie.
+        ->and(app(BalanceCalculator::class)->tenantBalance($this->tenant->id)->toDecimalString())
+        ->toBe('900.00');
+
+    Carbon::setTestNow();
+});
+
+it('AC-DEL-09 still enters review for unpaid rent alongside a deposit', function () {
+    Carbon::setTestNow('2026-02-10 02:30:00');
+
+    $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', "{$this->lease->id}:deposit", CarbonImmutable::parse('2026-02-01'),
+    );
+    $this->ledger->postCharge(
+        $this->lease, 'rent', 'tenant', Money::fromString('500.00'),
+        'Rent — February 2026', "{$this->lease->id}:rent:2026-02", CarbonImmutable::parse('2026-02-01'), '2026-02',
+    );
+
+    // The deposit changes nothing about the rent being late.
+    expect($this->delinquency->shouldEnterReview($this->lease))->toBeTrue();
+
+    Carbon::setTestNow();
+});
+
+it('AC-DEL-09 leaves a tenant who owes only a deposit able to pay online', function () {
+    Carbon::setTestNow('2026-02-10 02:30:00');
+
+    $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', "{$this->lease->id}:deposit", CarbonImmutable::parse('2026-02-01'),
+    );
+
+    // The whole point. Review suspends online payment (BR-11), so triggering on
+    // a deposit would lock the tenant out of the only route to pay it.
+    app(EvaluateDelinquency::class)->handle(
+        app(DelinquencyService::class),
+        app(BusinessCalendar::class),
+        app(AuditLogger::class),
+    );
+
+    expect($this->lease->fresh()->delinquency_state)->toBe('current');
+
+    Carbon::setTestNow();
+});
