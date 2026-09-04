@@ -103,7 +103,10 @@ class AuthorizeNetGateway
                 'merchantAuthentication' => $this->authentication(),
                 'transactionRequest' => $transaction,
                 'hostedPaymentSettings' => [
-                    'setting' => $this->hostedSettings($returnUrl, $cancelUrl),
+                    // The method was chosen on our page, before the fee was
+                    // disclosed and consented to, so the hosted page offers
+                    // exactly that one instrument (WP-39).
+                    'setting' => $this->hostedSettings($returnUrl, $cancelUrl, $payment->method),
                 ],
             ],
         ]);
@@ -347,6 +350,16 @@ class AuthorizeNetGateway
                 'merchantAuthentication' => $this->authentication(),
                 'customerProfileId' => $customerProfileId,
                 'includeIssuerInfo' => 'false',
+                // [WP-39] Without this the expiry comes back as literally
+                // "XXXX" and a saved card can never be shown as expiring, which
+                // is the one thing a saved card needs to tell you.
+                //
+                // This does not weaken I-5. PCI DSS classes the expiry as
+                // cardholder data, not *sensitive authentication* data — the
+                // things that may never be stored are the PAN, the CVV and
+                // track data, and we hold none of them at any point. A month
+                // and a year are not a card.
+                'unmaskExpirationDate' => 'true',
             ],
         ], retry: true);
 
@@ -354,15 +367,36 @@ class AuthorizeNetGateway
 
         foreach ($response['profile']['paymentProfiles'] ?? [] as $profile) {
             $id = $profile['customerPaymentProfileId'] ?? null;
-            $bank = $profile['payment']['bankAccount'] ?? null;
 
-            if (! is_string($id) || ! is_array($bank)) {
-                // A card profile, if one ever exists on the account. Cards are
-                // out of scope (Q-7) and we do not list what we cannot charge.
+            if (! is_string($id)) {
                 continue;
             }
 
-            $found[] = ['id' => $id, 'descriptor' => $this->describeBankAccount($bank)];
+            $bank = $profile['payment']['bankAccount'] ?? null;
+            $card = $profile['payment']['creditCard'] ?? null;
+
+            if (is_array($bank)) {
+                $found[] = [
+                    'id' => $id,
+                    'instrument_type' => 'bank',
+                    'descriptor' => $this->describeBankAccount($bank),
+                ];
+
+                continue;
+            }
+
+            // [WP-39] Cards were skipped here while Q-7 was open, on the
+            // principle that we do not list what we cannot charge. Q-7 closed
+            // yes on 2026-09-04, so they are listed — but still only ever as an
+            // id, a brand, four digits and an expiry (I-5).
+            if (is_array($card)) {
+                $found[] = [
+                    'id' => $id,
+                    'instrument_type' => 'card',
+                    'descriptor' => $this->describeCard($card),
+                    'expired' => $this->cardHasExpired($card),
+                ];
+            }
         }
 
         return $found;
@@ -386,6 +420,76 @@ class AuthorizeNetGateway
         $digits = substr((string) preg_replace('/\D/', '', (string) ($bank['accountNumber'] ?? '')), -4);
 
         return $digits === '' ? $type : $type.' ••••'.$digits;
+    }
+
+    /**
+     * "Visa ••••4242 exp 04/29" — the card equivalent of the above.  [WP-39]
+     *
+     * Four digits, a brand and a month. The gateway masks the number as
+     * XXXX4242 and we keep what it showed us; nothing is derived from what it
+     * did not (I-5).
+     *
+     * @param  array<string, mixed>  $card
+     */
+    public function describeCard(array $card): string
+    {
+        $brand = trim((string) ($card['cardType'] ?? ''));
+        $brand = $brand === '' ? 'Card' : $brand;
+
+        $digits = substr((string) preg_replace('/\D/', '', (string) ($card['cardNumber'] ?? '')), -4);
+        $descriptor = $digits === '' ? $brand : $brand.' ••••'.$digits;
+
+        $expiry = $this->cardExpiry($card);
+
+        // Silent when the expiry came back masked. "exp XX/XX" tells a tenant
+        // nothing and looks like a fault in the page.
+        return $expiry === null ? $descriptor : $descriptor.' exp '.$expiry->format('m/y');
+    }
+
+    /**
+     * Whether a saved card is past its expiry month.  [WP-39, AC-PAY-14]
+     *
+     * A card expires at the END of its stated month, so the comparison is
+     * against the last moment of that month, not the first. Getting this
+     * backwards would retire every card a month early.
+     *
+     * Unknown expiry is not expired: a masked value is missing information, and
+     * refusing a working card because we could not read its date would be a
+     * worse failure than letting the gateway decline it.
+     *
+     * @param  array<string, mixed>  $card
+     */
+    public function cardHasExpired(array $card, ?CarbonImmutable $asOf = null): bool
+    {
+        $expiry = $this->cardExpiry($card);
+
+        if ($expiry === null) {
+            return false;
+        }
+
+        return $expiry->endOfMonth()->isBefore($asOf ?? CarbonImmutable::now());
+    }
+
+    /**
+     * Authorize.Net returns `YYYY-MM` when unmasked and `XXXX` when not.
+     *
+     * @param  array<string, mixed>  $card
+     */
+    private function cardExpiry(array $card): ?CarbonImmutable
+    {
+        $raw = trim((string) ($card['expirationDate'] ?? ''));
+
+        if (! preg_match('/^(\d{4})-(\d{2})$/', $raw, $matches)) {
+            return null;
+        }
+
+        $month = (int) $matches[2];
+
+        if ($month < 1 || $month > 12) {
+            return null;
+        }
+
+        return CarbonImmutable::create((int) $matches[1], $month, 1)->startOfMonth();
     }
 
     /**
@@ -422,8 +526,19 @@ class AuthorizeNetGateway
      *
      * @return list<array{settingName: string, settingValue: string}>
      */
-    private function hostedSettings(string $returnUrl, string $cancelUrl): array
+    private function hostedSettings(string $returnUrl, string $cancelUrl, string $method): array
     {
+        // [WP-39] One instrument per hand-off, decided here rather than left to
+        // the tenant on Authorize.Net's page. The convenience fee is computed
+        // and consented to before we get here, so a tenant who picked "bank
+        // account" and then found a card field could pay a fee they were never
+        // shown, or dodge one they were. Neither is acceptable.
+        //
+        // Q-7 closed yes on 2026-09-04. The prior comment here read "Cards are
+        // out of scope for v1"; what made that true was this setting, not the
+        // enum, so this is the line that changes.
+        $card = $method === Payment::METHOD_CARD;
+
         $settings = [
             'hostedPaymentReturnOptions' => [
                 'showReceipt' => false,
@@ -433,12 +548,14 @@ class AuthorizeNetGateway
                 'cancelUrlText' => 'Cancel',
             ],
             'hostedPaymentButtonOptions' => ['text' => 'Pay'],
-            // Cards are out of scope for v1 (Q-7). Offering a card field we do
-            // not reconcile would be worse than not offering one.
             'hostedPaymentPaymentOptions' => [
-                'cardCodeRequired' => false,
-                'showCreditCard' => false,
-                'showBankAccount' => true,
+                // CVV required on cards. It is never stored, never returned to
+                // us and never reaches this system — Authorize.Net collects and
+                // discards it — but requiring it materially reduces fraud, and
+                // fraud on a rent payment becomes a chargeback months later.
+                'cardCodeRequired' => $card,
+                'showCreditCard' => $card,
+                'showBankAccount' => ! $card,
             ],
             'hostedPaymentSecurityOptions' => ['captcha' => false],
             // Offer to save the bank account as a CIM profile (FR-PAY-02). The

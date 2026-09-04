@@ -42,7 +42,9 @@ class SettingsSeeder extends Seeder
 
             // ── Payments ────────────────────────────────────────────────────
             ['payments.cards_enabled', 'false', 'bool', true,
-                'Q-7. Card payments are out of scope for v1 (F-28 is P2).'],
+                'Q-7 (closed 2026-09-04, yes). Cards ship switched off; turning this on offers them alongside ACH (WP-39).'],
+            ['payments.card_convenience_fee', '0.00', 'string', true,
+                'Q-7a. Flat fee added to a card payment, posted as its own ledger line. 0.00 means the landlord absorbs the processing cost.'],
             ['payments.overpayment_behaviour', 'credit_forward', 'string', true,
                 'Q-8. What happens to an overpayment remainder: credit_forward or refund.'],
 

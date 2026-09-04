@@ -62,6 +62,21 @@ class ReconciliationService
      */
     private const SETTLED_STATUSES = ['settledSuccessfully'];
 
+    /**
+     * ⚠ **[WP-39 — INCOMPLETE FOR CARDS]** These six are the ACH vocabulary,
+     * observed against the live sandbox on 19 Aug 2026. The card dispute
+     * statuses are **not** in this list and must be added once observed the
+     * same way — they are deliberately absent rather than guessed.
+     *
+     * Until then a chargeback reaches `apply()` and is not recognised as a
+     * failure, so the payment stays settled and the balance stays reduced for
+     * money the card network took back. That failure is *silent*, which UI §3.9
+     * names as the worst kind this system can have — hence this notice rather
+     * than a plausible-looking string.
+     *
+     * Everything else about the card path is finished and tested; this one line
+     * is the sandbox step.
+     */
     private const FAILED_STATUSES = [
         'returnedItem', 'declined', 'voided', 'expired', 'failedReview', 'settlementError',
     ];
@@ -300,6 +315,17 @@ class ReconciliationService
             $this->ledger->transitionStatus($entry, 'cleared');
         }
 
+        // [WP-39] Before allocation, deliberately. The payment entry is the
+        // gateway total (D-28), so if the fee charge did not exist yet the
+        // allocator would meet $350.93 against a $345.98 rent charge, call the
+        // difference an overpayment, credit it forward under Q-8, and then land
+        // the fee against that credit — the right balance by a route nobody can
+        // follow six months later.
+        //
+        // Posting it here rather than at submission also means an abandoned or
+        // voided payment never bills a fee, so `abandon()` needs no cascade.
+        $this->postConvenienceFee($payment);
+
         $this->allocations->allocate($payment->refresh());
 
         $this->audit->record('payment.settled', $payment, [
@@ -356,7 +382,16 @@ class ReconciliationService
         // D-02: the charges this payment had covered are outstanding again.
         $this->allocations->reverseFor($payment, "Payment returned ({$code})");
 
+        // [WP-39] The convenience fee goes back with the payment that caused
+        // it. Leaving it standing would bill a tenant for the privilege of
+        // making a payment that was then taken away from them.
+        $this->reverseConvenienceFee($payment);
+
         $fee = $this->postReturnedFee($payment, $code);
+
+        if ($payment->method === Payment::METHOD_CARD) {
+            $this->alertCardDispute($payment, $code, $description);
+        }
 
         $this->audit->record('payment.returned', $payment, [
             'amount' => $payment->amount->toDecimalString(),
@@ -391,6 +426,18 @@ class ReconciliationService
      */
     private function postReturnedFee(Payment $payment, string $code): ?Money
     {
+        // [WP-39] A card dispute is not a bounced payment. An ACH R01 says the
+        // account could not fund the debit — the tenant's own affair, and the
+        // fee is the agreed consequence. A chargeback says somebody disputed
+        // the charge, and where the cause is card fraud the tenant did nothing
+        // and is owed an apology rather than $35 they then have to argue back.
+        //
+        // So no automatic fee. `alertCardDispute()` puts it in front of an
+        // admin with the fee as a decision they take, and own.
+        if ($payment->method === Payment::METHOD_CARD) {
+            return null;
+        }
+
         if (! $this->settings->bool('fees.returned_fee_automatic', true)) {
             return null;
         }
@@ -417,6 +464,83 @@ class ReconciliationService
         );
 
         return $amount;
+    }
+
+    /**
+     * The card convenience fee for this payment.  [WP-39, Q-7a]
+     *
+     * Tenant only. A fee never touches the Housing Authority portion (I-7's
+     * reasoning, and the HA does not pay by card in any case). Idempotent on
+     * the payment id via the charge key, so re-running reconciliation over the
+     * same settlement — which happens every day for ten days — cannot charge
+     * twice (AC-PAY-12).
+     */
+    private function postConvenienceFee(Payment $payment): ?LedgerEntry
+    {
+        $fee = $payment->fee();
+        $lease = $payment->lease;
+
+        if ($fee->isZero() || ! $lease || $payment->payer !== 'tenant') {
+            return null;
+        }
+
+        return $this->ledger->postCharge(
+            $lease,
+            'convenience_fee',
+            'tenant',
+            $fee,
+            'Card payment fee',
+            "{$lease->id}:convfee:pmt{$payment->id}",
+            $this->calendar->today(),
+        );
+    }
+
+    /**
+     * Undo the fee when its payment is reversed.  [WP-39, D-22]
+     *
+     * A status transition rather than a reversing entry, following D-22: for a
+     * returned payment the status change **is** the restoration, because
+     * `returned` is not in BALANCE_AFFECTING. Posting a reversal as well would
+     * credit the tenant the fee twice. The row stays visible on the ledger with
+     * its original amount, which is what I-3 actually asks for — nothing is
+     * edited and nothing is deleted.
+     */
+    private function reverseConvenienceFee(Payment $payment): void
+    {
+        $entry = LedgerEntry::where('charge_key', "{$payment->lease_id}:convfee:pmt{$payment->id}")->first();
+
+        if (! $entry || ! in_array($entry->status, LedgerService::BALANCE_AFFECTING, true)) {
+            return;
+        }
+
+        $this->ledger->transitionStatus($entry, 'returned');
+    }
+
+    /**
+     * Put a card dispute in front of a human.  [WP-39]
+     *
+     * The balance has already been restored by the time this runs; this is not
+     * the correction, it is the notification that one happened. A chargeback is
+     * the one payment outcome nobody can act on automatically — whether it was
+     * fraud, a duplicate, or a tenant who simply changed their mind decides
+     * whether a fee is fair, and only a person can weigh that.
+     *
+     * Audit rather than a new table: `audit_logs` is already the admin-visible
+     * record (WP-29) and a dispute is exactly the kind of thing it exists for.
+     */
+    private function alertCardDispute(Payment $payment, string $code, string $description): void
+    {
+        $this->audit->record('payment.card_disputed', $payment, [
+            'amount' => $payment->amount->toDecimalString(),
+            'convenience_fee' => $payment->fee()->toDecimalString(),
+            'return_code' => $code,
+            'return_description' => $description,
+            'settled_at' => $payment->settled_at?->toDateTimeString(),
+            // Named so the admin browsing the log knows the fee was a choice
+            // withheld from the system, not one it forgot to make.
+            'returned_fee_charged' => false,
+            'action_required' => 'Review the dispute and decide whether the returned-payment fee applies.',
+        ]);
     }
 
     /**

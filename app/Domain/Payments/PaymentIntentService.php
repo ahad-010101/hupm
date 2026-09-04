@@ -9,6 +9,7 @@ use App\Models\LedgerEntry;
 use App\Models\Payment;
 use App\Support\AuditLogger;
 use App\Support\Money;
+use App\Support\Settings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -40,7 +41,25 @@ class PaymentIntentService
         private readonly LedgerService $ledger,
         private readonly PartialPaymentPolicy $policy,
         private readonly AuditLogger $audit,
+        private readonly Settings $settings,
     ) {}
+
+    /**
+     * The flat fee for choosing this method.  [WP-39, Q-7a]
+     *
+     * Zero for a bank transfer, always. Public because the portal has to show
+     * the tenant the figure *before* they choose, and it must be the same
+     * figure the intent charges — two readings of one setting is how a
+     * disclosed fee and a charged fee drift apart.
+     */
+    public function convenienceFee(string $method): Money
+    {
+        if ($method !== Payment::METHOD_CARD) {
+            return Money::zero();
+        }
+
+        return $this->settings->money('payments.card_convenience_fee', Money::zero());
+    }
 
     /**
      * Create (or recover) a payment intent and the form token that goes with it.
@@ -53,6 +72,7 @@ class PaymentIntentService
         string $idempotencyKey,
         string $returnUrl,
         string $cancelUrl,
+        string $method = Payment::METHOD_ECHECK,
     ): array {
         $this->guardDelinquency($lease);
 
@@ -60,6 +80,11 @@ class PaymentIntentService
         // refuse is our configuration, not an outage, and it should not leave a
         // failed payment behind to explain.
         $this->gateway->assertUsableReturnUrl($returnUrl);
+
+        // Checked here and not only in the FormRequest, for the same reason
+        // AC-DEL-04 checks delinquency here: a tenant can construct the request
+        // by hand once the radio has disappeared from the page.
+        $this->assertMethodAvailable($method);
 
         // A double-click is the same intent twice, not two intents (AC-PAY-02).
         // The token is cached with the payment so the second click reaches the
@@ -74,13 +99,22 @@ class PaymentIntentService
             ];
         }
 
+        // Evaluated on the RENT amount, never on the total (D-28). A
+        // convenience fee must never turn a payment the lease would have
+        // accepted into one it rejects.
         $verdict = $this->policy->check($lease, $amount);
 
         if (! $verdict['allowed']) {
             throw ValidationException::withMessages(['amount' => $verdict['reason']]);
         }
 
-        [$payment, $entry] = $this->recordIntent($lease, $amount, $idempotencyKey);
+        [$payment, $entry] = $this->recordIntent(
+            $lease,
+            $amount,
+            $this->convenienceFee($method),
+            $idempotencyKey,
+            $method,
+        );
 
         try {
             $token = $this->gateway->hostedPaymentToken(
@@ -169,16 +203,29 @@ class PaymentIntentService
     /**
      * @return array{0: Payment, 1: LedgerEntry}
      */
-    private function recordIntent(Lease $lease, Money $amount, string $idempotencyKey): array
-    {
-        return DB::transaction(function () use ($lease, $amount, $idempotencyKey) {
+    private function recordIntent(
+        Lease $lease,
+        Money $amount,
+        Money $fee,
+        string $idempotencyKey,
+        string $method,
+    ): array {
+        return DB::transaction(function () use ($lease, $amount, $fee, $idempotencyKey, $method) {
+            // [D-28] What the gateway will actually take. For eCheck the fee is
+            // zero and this is the rent, exactly as before.
+            $total = $amount->plus($fee);
+
             $payment = new Payment;
             $payment->forceFill([
                 'lease_id' => $lease->id,
                 'tenant_id' => $lease->tenant_id,
                 'payer' => 'tenant',
-                'amount' => $amount->toDecimalString(),
-                'method' => 'echeck',
+                'amount' => $total->toDecimalString(),
+                // NULL rather than 0.00 when there is no fee, so "this payment
+                // had no fee" and "this payment predates fees" read alike — the
+                // distinction has no consumer and inventing one invites a bug.
+                'convenience_fee' => $fee->isZero() ? null : $fee->toDecimalString(),
+                'method' => $method,
                 'gateway' => 'authorize_net',
                 'idempotency_key' => $idempotencyKey,
                 'status' => Payment::STATUS_PENDING,
@@ -186,24 +233,53 @@ class PaymentIntentService
             ])->save();
 
             // `pending`: visible to the tenant as "processing", counted in no
-            // balance anywhere (BR-05, I-6).
+            // balance anywhere (BR-05, I-6). The matching convenience-fee
+            // charge does not exist yet and deliberately so — it posts on
+            // settlement, so an abandoned payment never bills a fee.
             $entry = $this->ledger->postPayment(
                 $lease,
                 'tenant',
-                $amount,
+                $total,
                 'Payment submitted online',
                 $payment->id,
                 'pending',
             );
 
             $this->audit->record('payment.submitted', $payment, [
-                'amount' => $amount->toDecimalString(),
+                'amount' => $total->toDecimalString(),
+                'convenience_fee' => $fee->toDecimalString(),
+                'method' => $method,
                 'gateway' => 'authorize_net',
-                'sec_code' => AuthorizeNetGateway::SEC_CODE_WEB,
+                // NACHA's WEB code describes an internet-initiated debit from a
+                // bank account. It says nothing about a card, and recording it
+                // against one would be a false entry in an audit log.
+                'sec_code' => $method === Payment::METHOD_ECHECK
+                    ? AuthorizeNetGateway::SEC_CODE_WEB
+                    : null,
             ]);
 
             return [$payment, $entry];
         });
+    }
+
+    /**
+     * A method the tenant is not entitled to use is a validation failure, not a
+     * 403 — they have done nothing wrong, the option is simply switched off.
+     */
+    private function assertMethodAvailable(string $method): void
+    {
+        if ($method !== Payment::METHOD_CARD) {
+            return;
+        }
+
+        if ($this->settings->bool('payments.cards_enabled', false)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'method' => 'Card payments are not available at the moment. '
+                .'Please pay by bank transfer, or contact the office.',
+        ]);
     }
 
     /**

@@ -14,6 +14,7 @@ use App\Models\Unit;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
 use App\Support\Money;
+use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -150,7 +151,7 @@ it('sends the amount and an invoice reference, and never anything resembling ban
     });
 });
 
-it('offers no card option — cards are out of scope for v1', function () {
+it('offers only bank fields when the tenant chose a bank transfer', function () {
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'hosted-token-abc']))]);
 
     $this->postJson('/portal/pay', payPayload());
@@ -167,8 +168,9 @@ it('offers no card option — cards are out of scope for v1', function () {
 
         $decoded = json_decode($settings['settingValue'], true);
 
-        // Q-7: offering a card field we do not reconcile is worse than not
-        // offering one.
+        // [WP-39] One instrument per hand-off. The method was chosen on our
+        // page, before any fee was disclosed, so a card field appearing here
+        // would let a tenant pay by a method we did not price.
         return $decoded['showCreditCard'] === false && $decoded['showBankAccount'] === true;
     });
 });
@@ -684,4 +686,107 @@ it('I-4 never sends the housing authority figure to the pay screen', function ()
     expect($encoded)->not->toContain('700.00')
         ->not->toContain('housing_authority')
         ->and($props['balance'])->toBe('500.00');
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Card payments  [WP-39, Q-7 closed 2026-09-04]
+ |--------------------------------------------------------------------------
+ |
+ | Cards ride the same Accept Hosted page as eCheck, so I-5 and I-6 are
+ | untouched. What is new is the convenience fee, and the arithmetic that has
+ | to net to zero (D-28).
+ |
+ */
+
+it('AC-PAY-16 refuses a card payment while cards are switched off', function () {
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    // Default is off. The radio would be hidden, but AC-DEL-04's reasoning
+    // applies: a tenant can construct the request by hand.
+    $this->postJson('/portal/pay', payPayload(['method' => 'card']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('method');
+
+    expect(Payment::count())->toBe(0)
+        // Nothing written means nothing to undo (AC-PAY-04).
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-17 charges the gateway the rent plus the fee, and records both', function () {
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->postJson('/portal/pay', payPayload(['amount' => '345.98', 'method' => 'card']))
+        ->assertOk();
+
+    $payment = Payment::sole();
+
+    // [D-28] `amount` is what the gateway takes, not the rent portion.
+    expect($payment->amount->toDecimalString())->toBe('350.93')
+        ->and($payment->fee()->toDecimalString())->toBe('4.95')
+        ->and($payment->rentPortion()->toDecimalString())->toBe('345.98')
+        ->and($payment->method)->toBe('card')
+        // I-6 still: submitting is not paying, whatever the instrument.
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-17 asks the gateway for card fields and no bank fields', function () {
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->postJson('/portal/pay', payPayload(['method' => 'card']));
+
+    Http::assertSent(function ($request) {
+        $settings = collect($request->data()['getHostedPaymentPageRequest']['hostedPaymentSettings']['setting'] ?? [])
+            ->firstWhere('settingName', 'hostedPaymentPaymentOptions');
+
+        if (! $settings) {
+            return false;
+        }
+
+        $decoded = json_decode($settings['settingValue'], true);
+
+        return $decoded['showCreditCard'] === true
+            && $decoded['showBankAccount'] === false
+            // Never stored and never seen by us, but it is the cheapest
+            // defence against the fraud that becomes a chargeback later.
+            && $decoded['cardCodeRequired'] === true;
+    });
+});
+
+it('AC-PAY-18 charges no fee on a bank transfer, however the fee is set', function () {
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->postJson('/portal/pay', payPayload(['amount' => '345.98']))->assertOk();
+
+    $payment = Payment::sole();
+
+    expect($payment->amount->toDecimalString())->toBe('345.98')
+        // NULL, not 0.00 — "no fee" and "predates fees" read alike on purpose.
+        ->and($payment->convenience_fee)->toBeNull()
+        ->and($payment->method)->toBe('echeck');
+});
+
+it('AC-PAY-19 evaluates the lease policy on the rent, not on the rent plus fee', function () {
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+
+    // full_only: the tenant must pay the whole $500 balance and nothing else
+    // will do. With the fee added the gateway takes $504.95, and if the policy
+    // saw that number it would reject a payment that is exactly correct.
+    $this->lease->forceFill(['partial_payment_policy' => 'full_only'])->save();
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->postJson('/portal/pay', payPayload(['amount' => '500.00', 'method' => 'card']))
+        ->assertOk();
+
+    expect(Payment::sole()->amount->toDecimalString())->toBe('504.95');
 });
