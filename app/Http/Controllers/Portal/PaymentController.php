@@ -63,6 +63,11 @@ class PaymentController extends Controller
                 ?: $this->settings->string('company.emergency_phone'),
             'policy' => $lease ? $this->policyFor($lease) : null,
             'savedMethods' => $tenant ? $this->savedMethodsFor($tenant) : [],
+            // [WP-39] The fee comes from the same method the intent will use to
+            // charge it, so what the tenant is shown and what they are charged
+            // cannot drift.
+            'cardsEnabled' => $this->settings->bool('payments.cards_enabled', false),
+            'cardConvenienceFee' => (string) $this->intents->convenienceFee(Payment::METHOD_CARD),
             'gatewayReady' => $this->gateway->isConfigured(),
             // One per render, so a double submit is one payment (AC-PAY-02).
             'idempotencyKey' => (string) Str::uuid(),
@@ -81,6 +86,7 @@ class PaymentController extends Controller
                 idempotencyKey: $request->string('idempotency_key')->value(),
                 returnUrl: route('portal.pay.confirm'),
                 cancelUrl: route('portal.pay.confirm', ['cancelled' => 1]),
+                method: $request->string('method')->value() ?: Payment::METHOD_ECHECK,
             );
         } catch (GatewayUnavailableException $e) {
             // The tenant gets a soft, non-alarming message; the log gets the
@@ -220,6 +226,10 @@ class PaymentController extends Controller
                 'id' => $profile->id,
                 'descriptor' => $profile->descriptor,
                 'needs_update' => $profile->status === PaymentProfile::STATUS_NEEDS_UPDATE,
+                // [WP-39] Which method this one can pay with, so the page can
+                // hide a saved card behind a bank-transfer choice. The kind of
+                // instrument, never the instrument (I-5).
+                'instrument_type' => $profile->instrument_type,
             ])
             ->all();
     }

@@ -4,6 +4,8 @@ namespace App\Http\Requests\Portal;
 
 use App\Http\Requests\BaseFormRequest;
 use App\Models\Lease;
+use App\Models\Payment;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
@@ -38,6 +40,13 @@ class CreatePaymentRequest extends BaseFormRequest
             'lease_id' => ['required', 'integer'],
             'amount' => ['required', 'numeric', 'gt:0', 'max:99999999.99', 'decimal:0,2'],
             'idempotency_key' => ['required', 'string', 'size:36'],
+            // [WP-39] Optional so an older client, or a test written before
+            // cards existed, still means eCheck. Whether `card` is *allowed*
+            // is a settings question and lives in PaymentIntentService, which
+            // autopay would need to ask without an HTTP request in sight —
+            // the same reasoning that keeps the amount rules in
+            // PartialPaymentPolicy rather than here.
+            'method' => ['sometimes', Rule::in([Payment::METHOD_ECHECK, Payment::METHOD_CARD])],
         ];
     }
 

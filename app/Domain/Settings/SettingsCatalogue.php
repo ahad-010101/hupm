@@ -191,10 +191,24 @@ class SettingsCatalogue
             'payments.cards_enabled' => [
                 'group' => 'Payment methods',
                 'label' => 'Accept card payments',
-                'help' => 'Out of scope for this version. Card payments are not reconciled, so '
-                    .'offering the field would take money the system cannot account for.',
+                'help' => 'Lets residents pay by debit or credit card as well as by bank transfer. '
+                    .'The card is entered on the payment provider\'s own page and never reaches this '
+                    .'system, so nothing changes about what is stored here. Cards cost roughly 2.9% '
+                    .'plus 30¢ against about 25¢ for a bank transfer — set a convenience fee below '
+                    .'if residents should cover that.',
                 'input' => 'bool',
-                'warning' => 'Leave off. Nothing downstream handles a card payment yet.',
+            ],
+            'payments.card_convenience_fee' => [
+                'group' => 'Payment methods',
+                'label' => 'Card convenience fee',
+                'help' => 'A flat amount added when a resident chooses to pay by card, shown to them '
+                    .'before they confirm and posted to their ledger as its own line. Leave at 0.00 '
+                    .'to absorb the processing cost instead. Applies only to card payments — a bank '
+                    .'transfer is never charged a fee.',
+                'input' => 'number',
+                'warning' => 'A percentage of the payment is not offered here on purpose: card-brand '
+                    .'rules treat that as a surcharge, which must be registered with Visa and '
+                    .'Mastercard in advance and may not be applied to debit cards at all.',
             ],
 
             /*

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Casts\MoneyCast;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -35,6 +36,17 @@ class Payment extends Model
 
     public const STATUS_VOID = 'void';
 
+    /**
+     * The two methods a tenant can start online.  [WP-39]
+     *
+     * The `method` enum carries more than these — cheque, money order, cash,
+     * bank transfer, ha_remittance — but those are admin-recorded and never
+     * reach the gateway. These are the two the portal offers.
+     */
+    public const METHOD_ECHECK = 'echeck';
+
+    public const METHOD_CARD = 'card';
+
     /** Writes go through a domain service (I-11); nothing mass-assigns a payment. */
     protected $guarded = ['*'];
 
@@ -42,10 +54,37 @@ class Payment extends Model
     {
         return [
             'amount' => MoneyCast::class,
+            // NULL for every eCheck and for every payment written before WP-39,
+            // so this reads back as null and not as zero. Use fee() rather than
+            // the attribute wherever arithmetic follows.
+            'convenience_fee' => MoneyCast::class,
             'submitted_at' => 'datetime',
             'settled_at' => 'datetime',
             'returned_at' => 'datetime',
         ];
+    }
+
+    /**
+     * The convenience fee as money rather than as a maybe.  [WP-39]
+     *
+     * NULL and zero mean the same thing here — no fee — and every caller wants
+     * a Money it can add. Keeping the `?? zero` in one place stops it being
+     * forgotten in the one place it matters.
+     */
+    public function fee(): Money
+    {
+        return $this->convenience_fee ?? Money::zero();
+    }
+
+    /**
+     * What of this payment went to rent, as opposed to the fee.  [D-28]
+     *
+     * `amount` is the gateway total. This is the other half of that sentence,
+     * and having it named stops the subtraction being open-coded.
+     */
+    public function rentPortion(): Money
+    {
+        return $this->amount->minus($this->fee());
     }
 
     public function lease(): BelongsTo

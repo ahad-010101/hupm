@@ -619,3 +619,128 @@ it('shows the last successful run on the payments screen at all times', function
             ->where('reconciliation.never_run', true)
             ->has('unmatchedCount'));
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | Card payments and the convenience fee  [WP-39, D-28]
+ |--------------------------------------------------------------------------
+ |
+ | The fee posts on settlement, never at submission — so an abandoned payment
+ | never bills one — and it must post BEFORE allocation, or the allocator sees
+ | the fee as an overpayment and credits it forward instead.
+ |
+ */
+
+/** A submitted card payment: $500 of rent plus a $4.95 fee, as WP-39 writes it. */
+function pendingCard(string $rent = '500.00', string $fee = '4.95', string $transactionId = '60999888777'): Payment
+{
+    $total = Money::fromString($rent)->plus(Money::fromString($fee));
+
+    $payment = Payment::factory()->create([
+        'lease_id' => test()->lease->id,
+        'tenant_id' => test()->tenant->id,
+        // [D-28] The gateway total, not the rent portion.
+        'amount' => $total->toDecimalString(),
+        'convenience_fee' => $fee,
+        'method' => 'card',
+        'gateway' => 'authorize_net',
+        'gateway_transaction_id' => $transactionId,
+        'idempotency_key' => (string) Str::uuid(),
+        'submitted_at' => now()->subDays(2),
+    ]);
+
+    test()->ledger->postPayment(
+        test()->lease, 'tenant', $total,
+        'Payment submitted online', $payment->id, 'pending',
+    );
+
+    return $payment;
+}
+
+it('AC-PAY-20 posts the convenience fee on settlement and nets the balance to zero', function () {
+    $payment = pendingCard();
+
+    $this->batches = ['B1' => [settledTransaction('60999888777', ['settleAmount' => '504.95'])]];
+
+    $this->reconciliation->run();
+
+    $fee = LedgerEntry::where('category', 'convenience_fee')->sole();
+
+    expect($payment->fresh()->status)->toBe('settled')
+        ->and($fee->amount->toDecimalString())->toBe('4.95')
+        ->and($fee->payer)->toBe('tenant')
+        // +500 rent, −504.95 payment, +4.95 fee. The arithmetic D-28 exists for.
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
+});
+
+it('AC-PAY-20 posts the fee once across nine days of the same settlement window', function () {
+    pendingCard();
+
+    $this->batches = ['B1' => [settledTransaction('60999888777', ['settleAmount' => '504.95'])]];
+
+    $this->reconciliation->run();
+    $this->reconciliation->run();
+    $this->reconciliation->run();
+
+    // The charge key carries the payment id, so a re-run finds the existing row
+    // rather than writing a second (D-01, AC-PAY-12).
+    expect(LedgerEntry::where('category', 'convenience_fee')->count())->toBe(1)
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
+});
+
+it('AC-PAY-20 allocates the fee as a charge rather than calling it an overpayment', function () {
+    pendingCard();
+
+    $this->batches = ['B1' => [settledTransaction('60999888777', ['settleAmount' => '504.95'])]];
+
+    $this->reconciliation->run();
+
+    $fee = LedgerEntry::where('category', 'convenience_fee')->sole();
+
+    // Posted before allocate(), so the allocator meets it as an open charge.
+    // Reversed, the $4.95 would land as an overpayment and be credited forward
+    // under Q-8 — the same final balance by a route nobody can follow later.
+    expect(PaymentAllocation::where('charge_entry_id', $fee->id)->exists())->toBeTrue();
+});
+
+it('AC-PAY-21 charges no automatic returned-payment fee when a card is disputed', function () {
+    $payment = pendingCard();
+
+    $this->batches = ['B1' => [settledTransaction('60999888777', ['settleAmount' => '504.95'])]];
+    $this->reconciliation->run();
+
+    // The dispute. `returnedItem` is used here because the card vocabulary is
+    // not yet in FAILED_STATUSES — that one line waits on the sandbox. What is
+    // under test is the handling, which branches on the payment's method and is
+    // finished.
+    $this->batches = ['B2' => [settledTransaction('60999888777', [
+        'transactionStatus' => 'returnedItem',
+        'settleAmount' => '504.95',
+    ])]];
+
+    $this->reconciliation->run();
+
+    expect($payment->fresh()->status)->toBe('returned')
+        // An ACH R01 would have posted $35 here. A dispute is not a bounce.
+        ->and(LedgerEntry::where('category', 'returned_fee')->count())->toBe(0)
+        // The fee goes back with the payment that caused it.
+        ->and(LedgerEntry::where('category', 'convenience_fee')->sole()->status)->toBe('returned')
+        // Back to the rent owed, and nothing more.
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00')
+        ->and(DB::table('audit_logs')->where('action', 'payment.card_disputed')->count())->toBe(1);
+});
+
+it('AC-PAY-21 still charges the returned fee on a bounced eCheck', function () {
+    // The contrast that makes the rule above a rule and not a regression.
+    $payment = pendingEcheck();
+
+    $this->batches = ['B1' => [settledTransaction()]];
+    $this->reconciliation->run();
+
+    $this->batches = ['B2' => [settledTransaction('60123456789', ['transactionStatus' => 'returnedItem'])]];
+    $this->reconciliation->run();
+
+    expect($payment->fresh()->status)->toBe('returned')
+        ->and(LedgerEntry::where('category', 'returned_fee')->count())->toBe(1)
+        ->and(DB::table('audit_logs')->where('action', 'payment.card_disputed')->count())->toBe(0);
+});
