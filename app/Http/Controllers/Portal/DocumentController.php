@@ -5,8 +5,11 @@ namespace App\Http\Controllers\Portal;
 use App\Concerns\AuthorizesOwnership;
 use App\Domain\Documents\DocumentVault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Portal\UploadDocumentRequest;
 use App\Models\Document;
+use App\Models\Tenant;
 use App\Support\AuditLogger;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -53,8 +56,42 @@ class DocumentController extends Controller
                 'size_kb' => (int) ceil($document->size_bytes / 1024),
                 'is_signed' => $document->is_signed,
                 'download_url' => $this->vault->signedUrlFor($document, 'portal.documents.download'),
+                // [WP-42] Which direction it came from. A resident should be
+                // able to tell what they sent from what they were sent.
+                'sent_by_resident' => $document->uploaded_by_user_id === $request->user()->id,
             ])->all(),
+            'maxMb' => intdiv(DocumentVault::MAX_BYTES, 1048576),
         ]);
+    }
+
+    /**
+     * A resident sends a document in.  [WP-42, FR-DOC-01]
+     *
+     * The tenant is taken from the session, never from input — the same rule
+     * `index()` follows above, and the reason there is no route parameter here
+     * to get wrong (BR-20, I-9).
+     */
+    public function store(UploadDocumentRequest $request): RedirectResponse
+    {
+        $tenant = Tenant::findOrFail($request->user()->tenant_id);
+
+        $this->vault->store(
+            $tenant,
+            $request->file('file'),
+            [
+                // Always correspondence, always visible: it is theirs, and the
+                // landlord's filing categories are not the resident's to pick.
+                'category' => 'correspondence',
+                'title' => $request->string('title')->value(),
+                'visible_to_tenant' => true,
+            ],
+            $request->user(),
+        );
+
+        return back()->with(
+            'status',
+            'Thank you — we have received it. The office will be in touch if anything is needed.',
+        );
     }
 
     /**
