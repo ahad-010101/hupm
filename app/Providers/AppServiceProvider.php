@@ -30,6 +30,16 @@ class AppServiceProvider extends ServiceProvider
     */
     public const PAYMENT_ATTEMPTS_PER_HOUR = 5;
 
+    /**
+     * [WP-42] Ten documents an hour per tenant.
+     *
+     * Higher than payments because sending several photographs of one damp
+     * patch is ordinary and paying five times is not, but still far below what
+     * would fill a shared-hosting disk. The vault's own 25MB cap is the other
+     * half of that.
+     */
+    public const DOCUMENT_UPLOADS_PER_HOUR = 10;
+
     public const CONTACT_MESSAGES_PER_HOUR = 3;
 
     public const PASSWORD_RESETS_PER_HOUR = 3;
@@ -72,6 +82,21 @@ class AppServiceProvider extends ServiceProvider
                     'message' => 'That is several payment attempts in a short time. '
                         .'Please wait a little while, or call the office if something is wrong.',
                 ], 429));
+        });
+
+        // [WP-42] Resident document uploads, keyed on the tenant for the same
+        // reason as payments above. An upload endpoint is the classic way in,
+        // and the refusal says to telephone rather than leaving somebody who
+        // genuinely needs to send something with no route at all.
+        RateLimiter::for('portal-uploads', function ($request) {
+            $tenantId = $request->user()?->tenant_id;
+
+            return Limit::perHour(self::DOCUMENT_UPLOADS_PER_HOUR)
+                ->by($tenantId ? 'tenant:'.$tenantId : 'ip:'.$request->ip())
+                ->response(fn () => back()->withErrors([
+                    'file' => 'That is a lot of files in a short time. Please wait a little while, '
+                        .'or call the office if something is wrong.',
+                ]));
         });
 
         /*

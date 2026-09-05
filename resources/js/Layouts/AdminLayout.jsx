@@ -16,6 +16,7 @@ import {
     HomeIcon,
     MegaphoneIcon,
     PencilSquareIcon,
+    ReceiptPercentIcon,
     ShieldCheckIcon,
     TruckIcon,
     UsersIcon,
@@ -49,6 +50,7 @@ const NAV_GROUPS = [
         label: 'Money',
         items: [
             { href: '/admin/ledger', label: 'Ledger', icon: BookOpenIcon },
+            { href: '/admin/charges', label: 'Charges', icon: ReceiptPercentIcon },
             { href: '/admin/payments', label: 'Payments', icon: BanknotesIcon },
             { href: '/admin/delinquency', label: 'Delinquency', icon: ExclamationTriangleIcon },
             { href: '/admin/arrangements', label: 'Arrangements', icon: ClipboardDocumentCheckIcon },

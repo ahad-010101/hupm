@@ -3,6 +3,8 @@
 use App\Http\Controllers\Admin\AddressLookupController;
 use App\Http\Controllers\Admin\ArrangementController;
 use App\Http\Controllers\Admin\AuditController;
+use App\Http\Controllers\Admin\BulkChargeController;
+use App\Http\Controllers\Admin\ChargeTypeController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DelinquencyController;
 use App\Http\Controllers\Admin\DocumentController as AdminDocumentController;
@@ -111,6 +113,11 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
             ->whereNumber(['notice', 'attachment'])->name('notices.attachment');
 
         Route::get('/documents', [DocumentController::class, 'index'])->name('documents.index');
+        // [WP-42] Residents send documents in. Rate limited on the tenant, like
+        // the payment endpoint: an upload endpoint is the classic way in, and a
+        // household behind one address is one tenant.
+        Route::post('/documents', [DocumentController::class, 'store'])
+            ->middleware('throttle:portal-uploads')->name('documents.store');
         Route::get('/documents/{document}', [DocumentController::class, 'show'])
             ->whereNumber('document')->name('documents.show');
         // API-POR-16. Signed with a five-minute life (AC-DOC-03) *and* behind
@@ -290,6 +297,25 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
             ->whereNumber('notice')->name('notices.show');
         Route::get('notices/{notice}/attachments/{attachment}', [AdminNoticeController::class, 'attachment'])
             ->whereNumber(['notice', 'attachment'])->name('notices.attachment');
+
+        // Charges (WP-41). Types are the reusable purposes; the bulk screen
+        // posts them. The literal `charges/types` segments are declared before
+        // anything carrying a {chargeType} parameter, so a route cannot shadow
+        // them — the same ordering rule as payments/record above.
+        Route::get('charges', [BulkChargeController::class, 'index'])->name('charges.index');
+        Route::post('charges', [BulkChargeController::class, 'store'])->name('charges.store');
+
+        Route::get('charges/types', [ChargeTypeController::class, 'index'])->name('charges.types.index');
+        Route::post('charges/types', [ChargeTypeController::class, 'store'])->name('charges.types.store');
+
+        Route::patch('charges/types/{chargeType}', [ChargeTypeController::class, 'update'])
+            ->whereNumber('chargeType')->name('charges.types.update');
+        Route::delete('charges/types/{chargeType}', [ChargeTypeController::class, 'destroy'])
+            ->whereNumber('chargeType')->name('charges.types.destroy');
+        Route::post('charges/types/{chargeType}/stop', [BulkChargeController::class, 'stopSchedule'])
+            ->whereNumber('chargeType')->name('charges.types.stop');
+        Route::post('charges/batches/{batch}/reverse', [BulkChargeController::class, 'reverse'])
+            ->whereNumber('batch')->name('charges.batches.reverse');
 
         // Document vault (API-ADM-26/27). Version history is nested in the
         // list rather than behind its own endpoint (GAP-2, D-12).

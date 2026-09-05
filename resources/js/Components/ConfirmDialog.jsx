@@ -28,6 +28,15 @@ export default function ConfirmDialog({
     const confirmRef = useRef(null);
     const previouslyFocused = useRef(null);
 
+    // Escape has to call the CURRENT onCancel, but the effect below must not
+    // re-run when a new one arrives — see the dependency note there. A ref
+    // gives us the latest handler without making it a dependency.
+    const cancelRef = useRef(onCancel);
+
+    useEffect(() => {
+        cancelRef.current = onCancel;
+    });
+
     useEffect(() => {
         if (!open) return undefined;
 
@@ -36,7 +45,7 @@ export default function ConfirmDialog({
 
         const onKeyDown = (event) => {
             if (event.key === 'Escape') {
-                onCancel?.();
+                cancelRef.current?.();
                 return;
             }
 
@@ -66,7 +75,19 @@ export default function ConfirmDialog({
             document.removeEventListener('keydown', onKeyDown);
             previouslyFocused.current?.focus?.();
         };
-    }, [open, onCancel]);
+        // `open` ONLY, deliberately.
+        //
+        // `onCancel` used to be a dependency, and every caller passes an inline
+        // arrow — so its identity changed on every render. Typing one character
+        // into a field inside the dialog re-rendered the parent, which tore this
+        // effect down (restoring focus to the trigger) and re-ran it (moving
+        // focus to the confirm button). The field lost focus after a single
+        // keystroke, which made the ledger adjustment form unusable.
+        //
+        // The handler is read through cancelRef instead, so Escape still calls
+        // the current one without the effect depending on its identity.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     if (!open) return null;
 

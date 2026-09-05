@@ -36,14 +36,26 @@ class DocumentController extends Controller
 
         // Only the head of each chain. The older versions hang off it.
         $current = Document::query()
-            ->with('tenant:id,first_name,last_name')
+            ->with(['tenant:id,first_name,last_name', 'uploadedBy:id,role'])
             ->whereNotIn('id', Document::query()
                 ->whereNotNull('supersedes_document_id')
                 ->pluck('supersedes_document_id'))
             ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
             ->when($request->string('category')->value(), fn ($q, $c) => $q->where('category', $c))
+            // [WP-42] Documents a resident sent in. A document nobody reads is
+            // worse than no document, so they have to be findable — the column
+            // that distinguishes them is who uploaded it.
+            ->when(
+                $request->boolean('from_residents'),
+                fn ($q) => $q->whereHas('uploadedBy', fn ($u) => $u->where('role', 'tenant')),
+            )
             ->orderByDesc('created_at')
             ->get();
+
+        // Surfaced whether or not the filter is on: the count is the prompt.
+        $fromResidents = Document::query()
+            ->whereHas('uploadedBy', fn ($u) => $u->where('role', 'tenant'))
+            ->count();
 
         return Inertia::render('Admin/Documents/Index', [
             'documents' => $current->map(fn (Document $document) => [
@@ -59,7 +71,12 @@ class DocumentController extends Controller
             'categories' => DocumentVault::CATEGORIES,
             'tenants' => Tenant::orderBy('last_name')->get(['id', 'first_name', 'last_name'])
                 ->map(fn (Tenant $t) => ['id' => $t->id, 'name' => $t->fullName()]),
-            'filters' => ['tenant_id' => $tenantId, 'category' => $request->string('category')->value()],
+            'filters' => [
+                'tenant_id' => $tenantId,
+                'category' => $request->string('category')->value(),
+                'from_residents' => $request->boolean('from_residents'),
+            ],
+            'fromResidentsCount' => $fromResidents,
             'maxMegabytes' => intdiv(DocumentVault::MAX_BYTES, 1048576),
         ]);
     }
@@ -146,6 +163,10 @@ class DocumentController extends Controller
             'sha256_short' => substr($document->sha256, 0, 12),
             'is_signed' => $document->is_signed,
             'visible_to_tenant' => $document->visible_to_tenant,
+            // [WP-42] Which direction it came from. `uploadedBy` is eager
+            // loaded on the list query; it is null for anything the system
+            // generated itself, which reads as "not from a resident".
+            'from_resident' => $document->uploadedBy?->role === 'tenant',
             'added_on' => $document->created_at?->format('j M Y'),
             'download_url' => $this->vault->signedUrlFor($document, 'admin.documents.download'),
         ];
