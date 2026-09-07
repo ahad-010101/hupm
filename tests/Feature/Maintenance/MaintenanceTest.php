@@ -1,10 +1,12 @@
 <?php
 
+use App\Domain\Ledger\BalanceCalculator;
 use App\Domain\Maintenance\MaintenanceService;
 use App\Domain\Maintenance\TicketStateMachine;
 use App\Domain\Notifications\NotificationTemplate;
 use App\Exceptions\ImmutableRecordException;
 use App\Models\Lease;
+use App\Models\LedgerEntry;
 use App\Models\MaintenanceAttachment;
 use App\Models\MaintenanceEvent;
 use App\Models\MaintenanceRequest as Ticket;
@@ -463,4 +465,141 @@ it('sorts urgent tickets to the top of the admin queue', function () {
 
     expect($props['tickets']['data'][0]['ticket_number'])->toBe($urgent->ticket_number)
         ->and($props['emergencyCount'])->toBe(1);
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | Maintenance as money  [WP-45, FR-MNT-03]
+ |--------------------------------------------------------------------------
+ |
+ | Two amounts that are never the same number: what the work cost the
+ | landlord, and what the resident was charged. Most repairs are the
+ | landlord's, so billing is a deliberate act and never the default.
+ |
+ */
+
+/**
+ * A ticket walked to the point where closing it is legal.
+ *
+ * submitted -> triaged -> in progress -> awaiting confirmation. The state
+ * machine refuses to jump straight to closed, and rightly so: a ticket nobody
+ * worked on cannot be finished.
+ */
+function closableTicket(): Ticket
+{
+    $ticket = submitTicket();
+
+    foreach (['triaged', 'in_progress', 'awaiting_tenant_confirmation'] as $state) {
+        test()->maintenance->transition($ticket, $state, test()->admin);
+    }
+
+    return $ticket->refresh();
+}
+
+it('AC-MNT-11 closing a ticket without billing puts nothing on the resident ledger', function () {
+    $ticket = closableTicket();
+
+    $this->actingAs($this->admin)
+        ->patch("/admin/maintenance/{$ticket->id}/status", [
+            'to' => 'closed',
+            'close_reason' => 'Repaired on site',
+            'cost_amount' => '180.00',
+        ])
+        ->assertSessionHasNoErrors();
+
+    $ticket->refresh();
+
+    expect($ticket->status)->toBe('closed')
+        // The cost is recorded — that is money OUT, and belongs to the landlord.
+        ->and($ticket->cost_amount->toDecimalString())->toBe('180.00')
+        // And nothing whatsoever reached the resident.
+        ->and($ticket->billed_ledger_entry_id)->toBeNull()
+        ->and(app(BalanceCalculator::class)
+            ->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
+});
+
+it('AC-MNT-12 bills the resident when asked, naming the ticket on their ledger', function () {
+    $ticket = closableTicket();
+
+    $this->actingAs($this->admin)
+        ->patch("/admin/maintenance/{$ticket->id}/status", [
+            'to' => 'closed',
+            'close_reason' => 'Resident damage',
+            'cost_amount' => '180.00',
+            'bill_resident' => 1,
+            'billed_amount' => '120.00',
+            'billed_reason' => 'Broken window, tenant responsibility',
+        ])
+        ->assertSessionHasNoErrors();
+
+    $ticket->refresh();
+    $entry = LedgerEntry::sole();
+
+    expect($ticket->billed_amount->toDecimalString())->toBe('120.00')
+        ->and($ticket->billed_ledger_entry_id)->toBe($entry->id)
+        // The charge is what the resident owes, NOT what it cost the landlord.
+        ->and($entry->amount->toDecimalString())->toBe('120.00')
+        ->and($entry->payer)->toBe('tenant')
+        // The ticket number is in the wording, so "what is this $120" is
+        // answered by the line itself a year later.
+        ->and($entry->description)->toContain($ticket->ticket_number)
+        ->and(app(BalanceCalculator::class)
+            ->tenantBalance($this->tenant->id)->toDecimalString())->toBe('120.00');
+});
+
+it('AC-MNT-13 bills once, however many times the request arrives', function () {
+    $ticket = closableTicket();
+
+    $payload = [
+        'to' => 'closed',
+        'close_reason' => 'Resident damage',
+        'bill_resident' => 1,
+        'billed_amount' => '120.00',
+        'billed_reason' => 'Broken window',
+    ];
+
+    $this->actingAs($this->admin)->patch("/admin/maintenance/{$ticket->id}/status", $payload);
+
+    // A retried request, or a second admin. The charge key is {lease}:ticket{id}.
+    $this->actingAs($this->admin)->patch("/admin/maintenance/{$ticket->id}/status", $payload);
+
+    expect(LedgerEntry::where('type', 'charge')->count())->toBe(1)
+        ->and(app(BalanceCalculator::class)
+            ->tenantBalance($this->tenant->id)->toDecimalString())->toBe('120.00');
+});
+
+it('AC-MNT-14 refuses to bill without an amount or a reason', function () {
+    $ticket = closableTicket();
+
+    $this->actingAs($this->admin)
+        ->patch("/admin/maintenance/{$ticket->id}/status", [
+            'to' => 'closed',
+            'close_reason' => 'Done',
+            'bill_resident' => 1,
+        ])
+        ->assertSessionHasErrors(['billed_amount', 'billed_reason']);
+
+    expect(LedgerEntry::count())->toBe(0);
+});
+
+it('AC-MNT-15 never bills the housing authority for a repair', function () {
+    // A subsidised lease: the agency funds the rent, not the resident's damage.
+    $this->lease->forceFill([
+        'tenant_portion' => '300.00',
+        'ha_portion' => '200.00',
+        'is_subsidised' => true,
+    ])->save();
+
+    $ticket = closableTicket();
+
+    $this->actingAs($this->admin)->patch("/admin/maintenance/{$ticket->id}/status", [
+        'to' => 'closed',
+        'close_reason' => 'Resident damage',
+        'bill_resident' => 1,
+        'billed_amount' => '120.00',
+        'billed_reason' => 'Broken window',
+    ]);
+
+    expect(LedgerEntry::where('payer', 'housing_authority')->count())->toBe(0)
+        ->and(LedgerEntry::sole()->payer)->toBe('tenant');
 });

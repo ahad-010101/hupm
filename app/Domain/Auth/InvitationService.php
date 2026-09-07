@@ -49,6 +49,59 @@ class InvitationService
             return null;
         }
 
+        return $this->createAccount($name, $email, User::ROLE_TENANT, ['tenant_id' => $tenantId]);
+    }
+
+    /**
+     * The login for an agency.  [WP-43]
+     *
+     * Same flow as a tenant — a token, a set-password link, no password ever
+     * chosen by us. Only the role and the subject column differ.
+     */
+    public function inviteHousingAuthority(int $housingAuthorityId, string $name, ?string $email): ?User
+    {
+        if ($email === null || trim($email) === '') {
+            $this->audit->record('auth.invite.skipped', null, [
+                'housing_authority_id' => $housingAuthorityId,
+                'reason' => 'no email address on file',
+            ]);
+
+            return null;
+        }
+
+        return $this->createAccount($name, $email, User::ROLE_HOUSING_AUTHORITY, [
+            'housing_authority_id' => $housingAuthorityId,
+        ]);
+    }
+
+    /**
+     * The login for a contractor.  [WP-44, reverses NG-6]
+     *
+     * WP-37 asserted a contractor is a record and not an account. The client
+     * asked for the portal on 5 Sep 2026; the reversal is recorded in the plan
+     * rather than worked around here.
+     */
+    public function inviteVendor(int $vendorId, string $name, ?string $email): ?User
+    {
+        if ($email === null || trim($email) === '') {
+            $this->audit->record('auth.invite.skipped', null, [
+                'vendor_id' => $vendorId,
+                'reason' => 'no email address on file',
+            ]);
+
+            return null;
+        }
+
+        return $this->createAccount($name, $email, User::ROLE_VENDOR, ['vendor_id' => $vendorId]);
+    }
+
+    /**
+     * One account-creation path for all three.
+     *
+     * @param  array<string, int>  $subject  the single column binding this login to its subject
+     */
+    private function createAccount(string $name, string $email, string $role, array $subject): User
+    {
         $user = User::create([
             'name' => $name,
             'email' => $email,
@@ -56,8 +109,8 @@ class InvitationService
 
         // Privilege is set explicitly, never mass-assigned (I-11).
         $user->forceFill([
-            'tenant_id' => $tenantId,
-            'role' => User::ROLE_TENANT,
+            ...$subject,
+            'role' => $role,
             'status' => User::STATUS_INVITED,
             'password' => null,
         ])->save();

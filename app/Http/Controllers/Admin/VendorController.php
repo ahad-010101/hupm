@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Auth\InvitationService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\VendorRequest;
 use App\Models\MaintenanceRequest;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Support\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -111,5 +113,43 @@ class VendorController extends Controller
         $vendor->delete();
 
         return back()->with('status', "{$vendor->name} was removed.");
+    }
+
+    /**
+     * Give a contractor a login.  [WP-44, reverses NG-6]
+     *
+     * WP-37 built contractors as records and asserted they would never have
+     * accounts. The client asked for the portal on 5 Sep 2026 and that decision
+     * is reversed deliberately — see WP-44 in the plan, and the rewritten test
+     * in VendorTest.
+     *
+     * A contractor with no email address has no account and no way to get one,
+     * exactly as a resident does (Q-4). That is a state, not a fault.
+     */
+    public function invite(Vendor $vendor, InvitationService $invitations): RedirectResponse
+    {
+        if (! $vendor->email) {
+            return back()->withErrors([
+                'invite' => "{$vendor->name} has no email address, so an account cannot be created. "
+                    .'Add one first, or keep telephoning them.',
+            ]);
+        }
+
+        $existing = User::where('vendor_id', $vendor->id)->first();
+
+        if ($existing?->status === User::STATUS_ACTIVE) {
+            return back()->withErrors([
+                'invite' => "{$vendor->name} already has an account. Use password reset if they cannot sign in.",
+            ]);
+        }
+
+        if ($existing) {
+            // Resend rather than create a second account.
+            $invitations->sendSetPasswordLink($existing);
+        } else {
+            $invitations->inviteVendor($vendor->id, $vendor->name, $vendor->email);
+        }
+
+        return back()->with('status', "Sent {$vendor->name} a link to set their password.");
     }
 }

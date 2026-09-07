@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Domain\Maintenance\MaintenanceService;
+use App\Domain\Maintenance\TicketBillingService;
 use App\Domain\Maintenance\TicketStateMachine;
 use App\Http\Controllers\Controller;
 use App\Models\MaintenanceAttachment;
 use App\Models\MaintenanceRequest as Ticket;
 use App\Models\Vendor;
+use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -30,6 +32,7 @@ class MaintenanceController extends Controller
     public function __construct(
         private readonly MaintenanceService $maintenance,
         private readonly TicketStateMachine $states,
+        private readonly TicketBillingService $billing,
     ) {}
 
     /** API-ADM-21. */
@@ -132,9 +135,23 @@ class MaintenanceController extends Controller
             // refuses without it regardless of what arrives here.
             'close_reason' => ['nullable', 'string', 'max:500', 'required_if:to,closed'],
             'scheduled_at' => ['nullable', 'date', 'required_if:to,scheduled'],
+
+            // [WP-45] What the work cost the landlord. Optional, never shown to
+            // a resident, and recording it bills nobody.
+            'cost_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
+
+            // Billing the resident is a separate, deliberate act. Unticked by
+            // default on the form: most repairs are the landlord's, and a
+            // pre-ticked box is how somebody gets billed for a boiler.
+            'bill_resident' => ['sometimes', 'boolean'],
+            'billed_amount' => ['nullable', 'required_if:bill_resident,1', 'numeric', 'gt:0', 'max:99999999.99', 'decimal:0,2'],
+            'billed_reason' => ['nullable', 'required_if:bill_resident,1', 'string', 'min:3', 'max:500'],
         ], [
             'close_reason.required_if' => 'Closing a request the resident has not confirmed needs a reason.',
             'scheduled_at.required_if' => 'When is the visit?',
+            'billed_amount.required_if' => 'How much is the resident being charged?',
+            'billed_amount.gt' => 'Enter an amount greater than zero.',
+            'billed_reason.required_if' => 'Say why the resident is being charged. It goes on their ledger.',
         ]);
 
         try {
@@ -156,6 +173,35 @@ class MaintenanceController extends Controller
             }
         } catch (\InvalidArgumentException $e) {
             throw ValidationException::withMessages(['to' => $e->getMessage()]);
+        }
+
+        // [WP-45] The money, after the status change succeeded. Recording a
+        // cost and billing a resident are separate acts and only the second
+        // touches a ledger.
+        if (array_key_exists('cost_amount', $validated) && $validated['cost_amount'] !== null) {
+            $this->billing->recordCost(
+                $maintenance,
+                Money::fromString((string) $validated['cost_amount']),
+                $request->user(),
+            );
+        }
+
+        if ($request->boolean('bill_resident')) {
+            try {
+                $this->billing->billResident(
+                    $maintenance,
+                    Money::fromString((string) $validated['billed_amount']),
+                    $validated['billed_reason'],
+                    $request->user(),
+                );
+            } catch (\InvalidArgumentException $e) {
+                throw ValidationException::withMessages(['billed_amount' => $e->getMessage()]);
+            }
+
+            return back()->with(
+                'status',
+                'Ticket updated, and the resident has been charged. It is on their ledger now.',
+            );
         }
 
         return back()->with('status', 'Ticket updated.');

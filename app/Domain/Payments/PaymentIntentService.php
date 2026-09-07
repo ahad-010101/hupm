@@ -74,8 +74,18 @@ class PaymentIntentService
         string $cancelUrl,
         string $method = Payment::METHOD_ECHECK,
         string $appliesTo = Payment::APPLIES_TO_BALANCE,
+        string $payer = 'tenant',
     ): array {
-        $this->guardDelinquency($lease);
+        // [WP-43] Delinquency and the partial-payment policy are rules about a
+        // RESIDENT. Management Review suspends a resident's online payment; an
+        // agency is not in review and never can be, and a lease's partial-payment
+        // policy is an agreement with the tenant. Neither applies to a HAP
+        // remittance, so an agency payment skips both.
+        $isAgency = $payer === 'housing_authority';
+
+        if (! $isAgency) {
+            $this->guardDelinquency($lease);
+        }
 
         // Before anything is written or sent: a return URL the gateway will
         // refuse is our configuration, not an outage, and it should not leave a
@@ -108,7 +118,7 @@ class PaymentIntentService
         // Evaluated on the RENT amount, never on the total (D-28). A
         // convenience fee must never turn a payment the lease would have
         // accepted into one it rejects.
-        if ($appliesTo !== Payment::APPLIES_TO_DEPOSIT) {
+        if (! $isAgency && $appliesTo !== Payment::APPLIES_TO_DEPOSIT) {
             $verdict = $this->policy->check($lease, $amount);
 
             if (! $verdict['allowed']) {
@@ -123,6 +133,7 @@ class PaymentIntentService
             $idempotencyKey,
             $method,
             $appliesTo,
+            $payer,
         );
 
         try {
@@ -219,8 +230,9 @@ class PaymentIntentService
         string $idempotencyKey,
         string $method,
         string $appliesTo,
+        string $payer,
     ): array {
-        return DB::transaction(function () use ($lease, $amount, $fee, $idempotencyKey, $method, $appliesTo) {
+        return DB::transaction(function () use ($lease, $amount, $fee, $idempotencyKey, $method, $appliesTo, $payer) {
             // [D-28] What the gateway will actually take. For eCheck the fee is
             // zero and this is the rent, exactly as before.
             $total = $amount->plus($fee);
@@ -229,7 +241,7 @@ class PaymentIntentService
             $payment->forceFill([
                 'lease_id' => $lease->id,
                 'tenant_id' => $lease->tenant_id,
-                'payer' => 'tenant',
+                'payer' => $payer,
                 'applies_to' => $appliesTo,
                 'amount' => $total->toDecimalString(),
                 // NULL rather than 0.00 when there is no fee, so "this payment
@@ -249,7 +261,7 @@ class PaymentIntentService
             // settlement, so an abandoned payment never bills a fee.
             $entry = $this->ledger->postPayment(
                 $lease,
-                'tenant',
+                $payer,
                 $total,
                 $appliesTo === Payment::APPLIES_TO_DEPOSIT
                     ? 'Security deposit submitted online'
