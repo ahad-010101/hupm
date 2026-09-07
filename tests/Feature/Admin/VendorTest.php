@@ -277,27 +277,67 @@ it('audits adding, editing and removing a contractor', function () {
  |--------------------------------------------------------------------------
  */
 
-it('NG-6 creates no login for a contractor', function () {
+it('AC-VEN-01 adding a contractor still creates no account by itself', function () {
     $before = User::count();
 
     $this->actingAs($this->admin)->post('/admin/vendors', vendorPayload());
 
-    // There is no vendor portal in v1. The plumber is telephoned, not invited,
-    // and an email address here is somewhere to send a job.
-    expect(User::count())->toBe($before);
-    expect(User::where('email', 'jobs@ridgeline.test')->exists())->toBeFalse();
+    // [WP-44] NG-6 was reversed on 5 Sep 2026 and contractors can now have
+    // logins — but adding one still does not create an account. Access is a
+    // separate, deliberate act, the same way a resident is invited rather than
+    // provisioned. Most contractors are still telephoned.
+    expect(User::count())->toBe($before)
+        ->and(User::where('email', 'jobs@ridgeline.test')->exists())->toBeFalse();
 });
 
-it('has no route that would let a contractor sign in', function () {
-    $vendorRoutes = collect(app('router')->getRoutes())
-        ->filter(fn ($route) => str_contains($route->uri(), 'vendor'))
-        ->map(fn ($route) => $route->uri().' ['.implode(',', $route->methods()).']')
-        ->values()
-        ->all();
+it('AC-VEN-01 issues an account only when an admin invites them', function () {
+    $this->actingAs($this->admin)->post('/admin/vendors', vendorPayload());
+    $vendor = Vendor::sole();
 
-    foreach ($vendorRoutes as $route) {
-        expect($route)->not->toContain('login')
-            ->and($route)->not->toContain('invite')
-            ->and($route)->not->toContain('password');
+    $this->actingAs($this->admin)
+        ->post("/admin/vendors/{$vendor->id}/invite")
+        ->assertSessionHasNoErrors();
+
+    $account = User::where('vendor_id', $vendor->id)->sole();
+
+    expect($account->role)->toBe(User::ROLE_VENDOR)
+        // Invited, not active: they choose their own password from the link.
+        // We never set one, here or anywhere.
+        ->and($account->status)->toBe(User::STATUS_INVITED)
+        ->and($account->password)->toBeNull()
+        // Bound to one contractor, and to nothing else.
+        ->and($account->tenant_id)->toBeNull()
+        ->and($account->housing_authority_id)->toBeNull();
+});
+
+it('AC-VEN-01 refuses to invite a contractor with no email address', function () {
+    $this->actingAs($this->admin)->post('/admin/vendors', vendorPayload(['email' => null]));
+    $vendor = Vendor::sole();
+
+    $this->actingAs($this->admin)
+        ->post("/admin/vendors/{$vendor->id}/invite")
+        ->assertSessionHasErrors('invite');
+
+    // A contractor with no address is a legitimate record, not a fault — the
+    // same reasoning as Q-4 for residents.
+    expect(User::where('vendor_id', $vendor->id)->count())->toBe(0);
+});
+
+it('AC-VEN-02 keeps the contractor portal clear of anything financial', function () {
+    // The boundary that replaces NG-6's "no login at all". A contractor can
+    // sign in now, so what matters is what they cannot reach: no balance, no
+    // ledger, no payment route exists under their prefix.
+    $vendorPortalRoutes = collect(app('router')->getRoutes())
+        ->map(fn ($route) => $route->uri())
+        ->filter(fn (string $uri) => $uri === 'work' || str_starts_with($uri, 'work/'))
+        ->values();
+
+    expect($vendorPortalRoutes)->not->toBeEmpty();
+
+    foreach ($vendorPortalRoutes as $uri) {
+        expect($uri)->not->toContain('ledger')
+            ->and($uri)->not->toContain('payment')
+            ->and($uri)->not->toContain('balance')
+            ->and($uri)->not->toContain('charge');
     }
 });

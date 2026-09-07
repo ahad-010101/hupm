@@ -294,5 +294,12 @@ it('WP-34 registers no rate limiter the specification does not name', function (
 
     sort($registered);
 
-    expect($registered)->toBe(['authenticated', 'contact', 'password-reset', 'payments']);
+    // `portal-uploads` added at WP-42 (5 Sep 2026), ten an hour per tenant.
+    // Written down here and in the plan, which is what this test asks for:
+    // higher than payments because sending several photographs of one damp
+    // patch is ordinary and paying five times is not, and far below what would
+    // fill a shared-hosting disk. The vault's 25MB cap is the other half.
+    expect($registered)->toBe([
+        'authenticated', 'contact', 'password-reset', 'payments', 'portal-uploads',
+    ]);
 });

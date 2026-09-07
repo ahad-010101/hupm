@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Auth\InvitationService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\HousingAuthorityRequest;
 use App\Models\HousingAuthority;
+use App\Models\User;
 use App\Support\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -83,5 +85,44 @@ class HousingAuthorityController extends Controller
         return redirect()
             ->route('admin.housing-authorities.index')
             ->with('status', 'Housing authority removed.');
+    }
+
+    /**
+     * Give an agency a login.  [WP-43]
+     *
+     * Same flow as a resident: a link, a password they choose, nothing set by
+     * us. An agency with no contact email has no account and no way to get one
+     * — a legitimate state, not a fault.
+     */
+    public function invite(HousingAuthority $housingAuthority, InvitationService $invitations): RedirectResponse
+    {
+        if (! $housingAuthority->contact_email) {
+            return back()->withErrors([
+                'invite' => "{$housingAuthority->name} has no contact email address, so an account "
+                    .'cannot be created. Add one first.',
+            ]);
+        }
+
+        $existing = User::where('housing_authority_id', $housingAuthority->id)->first();
+
+        if ($existing?->status === User::STATUS_ACTIVE) {
+            return back()->withErrors([
+                'invite' => "{$housingAuthority->name} already has an account. "
+                    .'Use password reset if they cannot sign in.',
+            ]);
+        }
+
+        if ($existing) {
+            // Resend rather than create a second account.
+            $invitations->sendSetPasswordLink($existing);
+        } else {
+            $invitations->inviteHousingAuthority(
+                $housingAuthority->id,
+                $housingAuthority->contact_name ?: $housingAuthority->name,
+                $housingAuthority->contact_email,
+            );
+        }
+
+        return back()->with('status', "Sent {$housingAuthority->name} a link to set their password.");
     }
 }

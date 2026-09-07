@@ -24,6 +24,9 @@ use App\Http\Controllers\Admin\TenantController;
 use App\Http\Controllers\Admin\UnitController;
 use App\Http\Controllers\Admin\VendorController;
 use App\Http\Controllers\Admin\WeatherAlertController;
+use App\Http\Controllers\Ha\DashboardController as HaDashboardController;
+use App\Http\Controllers\Ha\PaymentController as HaPaymentController;
+use App\Http\Controllers\Vendor\TicketController as VendorTicketController;
 use App\Http\Controllers\Admin\WebsiteController;
 use App\Http\Controllers\Portal\DashboardController;
 use App\Http\Controllers\Portal\DocumentController;
@@ -128,6 +131,46 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
     });
 
     /*
+     | Housing authority portal  [WP-43, D-29]
+     |
+     | The mirror of I-4: an agency sees its own portion and nothing else.
+     | `payer = 'housing_authority'` is not a filter on these queries, it is the
+     | only thing they can return — the way the tenant portal above can only
+     | return the tenant's. A resident's own arrears are not disclosed here.
+     |
+     | The agency comes from the session. There is no route parameter naming
+     | one, so there is none to get wrong.
+     */
+    Route::middleware('role:housing_authority')->prefix('agency')->name('agency.')->group(function () {
+        Route::get('/', [HaDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/statement', [HaDashboardController::class, 'ledger'])->name('ledger');
+
+        // One payment per lease, never a lump sum. Rate limited like the
+        // resident's, keyed on the payer.
+        Route::post('/pay', [HaPaymentController::class, 'store'])
+            ->middleware('throttle:payments')->name('pay.store');
+        Route::get('/pay/confirm', [HaPaymentController::class, 'confirm'])->name('pay.confirm');
+    });
+
+    /*
+     | Contractor portal  [WP-44, reverses NG-6]
+     |
+     | Assigned tickets and nothing else. Every query is scoped from the
+     | session's vendor_id — there is no route parameter naming a vendor, so
+     | there is none to get wrong. Somebody else's ticket is a 404, never a 403.
+     |
+     | Nothing financial is reachable from this prefix, by construction: no
+     | balance, no ledger, no payment route exists under it.
+     */
+    Route::middleware('role:vendor')->prefix('work')->name('vendor.')->group(function () {
+        Route::get('/', [VendorTicketController::class, 'index'])->name('tickets.index');
+        Route::get('/{ticket}', [VendorTicketController::class, 'show'])
+            ->whereNumber('ticket')->name('tickets.show');
+        Route::patch('/{ticket}', [VendorTicketController::class, 'update'])
+            ->whereNumber('ticket')->name('tickets.update');
+    });
+
+    /*
      | Admin console
      */
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
@@ -166,6 +209,11 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
             ->whereNumber('vendor')->name('vendors.update');
         Route::delete('vendors/{vendor}', [VendorController::class, 'destroy'])
             ->whereNumber('vendor')->name('vendors.destroy');
+        // [WP-44] NG-6 reversed 5 Sep 2026: a contractor is now an account as
+        // well as a record. Separate from update, because issuing access is a
+        // different decision from correcting a phone number, and it sends email.
+        Route::post('vendors/{vendor}/invite', [VendorController::class, 'invite'])
+            ->whereNumber('vendor')->name('vendors.invite');
 
         /*
          | The public site (WP-36, D-27).
@@ -217,6 +265,10 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
         Route::delete('properties/{property}/units/{unit}', [UnitController::class, 'destroy'])->name('properties.units.destroy');
 
         Route::resource('housing-authorities', HousingAuthorityController::class)->except(['show']);
+        // [WP-43] Issuing agency access is a different decision from correcting
+        // a contact name, and it sends email.
+        Route::post('housing-authorities/{housingAuthority}/invite', [HousingAuthorityController::class, 'invite'])
+            ->whereNumber('housingAuthority')->name('housing-authorities.invite');
 
         // Tenants (API-ADM-05…07). The invite action is separate from update
         // because issuing portal access is a different decision from correcting

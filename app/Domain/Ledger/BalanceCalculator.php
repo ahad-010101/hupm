@@ -58,6 +58,57 @@ class BalanceCalculator
     }
 
     /**
+     * What one agency owes, across every lease it funds.  [WP-43]
+     *
+     * `haBalance()` answers per tenant and cannot be summed into this without a
+     * query per lease — at 17 leases that is 17 round trips to ask one
+     * question, and the shape that becomes 170.
+     *
+     * **`payer = 'housing_authority'` is not a filter here, it is the whole
+     * query.** The agency's own portion is the only thing this can return, the
+     * way the resident ledger can only return the tenant's (D-29, the mirror of
+     * I-4). Whether a resident is behind on their own rent is not the agency's
+     * business.
+     */
+    public function authorityBalance(int $housingAuthorityId): Money
+    {
+        $total = DB::table('ledger_entries as e')
+            ->join('leases as l', 'l.id', '=', 'e.lease_id')
+            ->where('l.housing_authority_id', $housingAuthorityId)
+            ->where('e.payer', 'housing_authority')
+            ->whereIn('e.status', LedgerService::BALANCE_AFFECTING)
+            ->sum('e.amount');
+
+        return Money::fromString((string) ($total ?: '0'));
+    }
+
+    /**
+     * The same, broken down by lease.  [WP-43]
+     *
+     * One query rather than one per lease, for the reason above.
+     *
+     * @return array<int, Money> keyed by lease id
+     */
+    public function authorityBalancesByLease(int $housingAuthorityId): array
+    {
+        $rows = DB::table('ledger_entries as e')
+            ->join('leases as l', 'l.id', '=', 'e.lease_id')
+            ->where('l.housing_authority_id', $housingAuthorityId)
+            ->where('e.payer', 'housing_authority')
+            ->whereIn('e.status', LedgerService::BALANCE_AFFECTING)
+            ->groupBy('e.lease_id')
+            ->get(['e.lease_id', DB::raw('SUM(e.amount) as total')]);
+
+        $balances = [];
+
+        foreach ($rows as $row) {
+            $balances[(int) $row->lease_id] = Money::fromString((string) ($row->total ?: '0'));
+        }
+
+        return $balances;
+    }
+
+    /**
      * The security deposit still outstanding.  [WP-40, Q-12]
      *
      * Charged less allocated, rather than a signed sum, because a deposit is

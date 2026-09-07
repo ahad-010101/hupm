@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\MoneyCast;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -62,7 +63,23 @@ class MaintenanceRequest extends Model
             'permission_to_enter' => 'boolean',
             'pets_present' => 'boolean',
             'is_emergency' => 'boolean',
+            // [WP-45] Two different facts. `cost_amount` is what the landlord
+            // paid and never reaches a resident; `billed_amount` is what the
+            // resident was charged, and is usually null.
+            'cost_amount' => MoneyCast::class,
+            'billed_amount' => MoneyCast::class,
         ];
+    }
+
+    /** The ledger row this ticket produced, if the resident was billed. */
+    public function billedEntry(): BelongsTo
+    {
+        return $this->belongsTo(LedgerEntry::class, 'billed_ledger_entry_id');
+    }
+
+    public function wasBilledToResident(): bool
+    {
+        return $this->billed_ledger_entry_id !== null;
     }
 
     public function tenant(): BelongsTo

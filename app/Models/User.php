@@ -31,6 +31,17 @@ class User extends Authenticatable
 
     public const ROLE_OWNER = 'owner';
 
+    /**
+     * Outside parties with a narrow reason to sign in.  [WP-43, WP-44]
+     *
+     * A housing authority sees the portion it funds and pays it. A contractor
+     * sees the jobs assigned to them. Neither can reach anything else, and each
+     * is bound to exactly one subject through the column below.
+     */
+    public const ROLE_HOUSING_AUTHORITY = 'housing_authority';
+
+    public const ROLE_VENDOR = 'vendor';
+
     public const STATUS_INVITED = 'invited';
 
     public const STATUS_ACTIVE = 'active';
@@ -88,6 +99,28 @@ class User extends Authenticatable
         return $this->role === self::ROLE_OWNER;
     }
 
+    /** The agency this account speaks for, if it is an agency account. */
+    public function housingAuthority(): BelongsTo
+    {
+        return $this->belongsTo(HousingAuthority::class);
+    }
+
+    /** The contractor this account belongs to, if it is a contractor account. */
+    public function vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class);
+    }
+
+    public function isHousingAuthority(): bool
+    {
+        return $this->role === self::ROLE_HOUSING_AUTHORITY;
+    }
+
+    public function isVendor(): bool
+    {
+        return $this->role === self::ROLE_VENDOR;
+    }
+
     /** Only an active account with a password may authenticate (FR-AUTH-01). */
     public function canAuthenticate(): bool
     {
@@ -100,6 +133,10 @@ class User extends Authenticatable
         return match ($this->role) {
             self::ROLE_ADMIN => '/admin',
             self::ROLE_OWNER => '/owner',
+            // [WP-43, WP-44] Each outside party lands on the only thing they
+            // can see. Falling through to /portal would 403 them at the door.
+            self::ROLE_HOUSING_AUTHORITY => '/agency',
+            self::ROLE_VENDOR => '/work',
             default => '/portal',
         };
     }
