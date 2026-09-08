@@ -214,10 +214,10 @@ class SettingsCatalogue
                 'input' => 'number',
                 'min' => 0,
                 'max' => 4,
-                // The only fractional setting in the catalogue. Without it the
-                // browser's default of step="1" refuses 2.9, and `accepts()`
-                // refuses it a second time — a percentage that can only be a
-                // whole number is not a percentage anybody prices with.
+                // Fractional. Without it the browser's default of step="1"
+                // refuses 2.9, and `accepts()` refuses it a second time — a
+                // percentage that can only be a whole number is not a
+                // percentage anybody prices with.
                 'step' => '0.01',
                 // Stated once, plainly, where the decision is made. This is a
                 // surcharge in card-brand terms, not a convenience fee, and
@@ -228,6 +228,29 @@ class SettingsCatalogue
                     .'cards may not be surcharged at all — this system cannot tell debit from credit '
                     .'before the payment is taken, so every card is charged the same. Take advice '
                     .'before setting this above zero.',
+            ],
+            'payments.echeck_fee_percent' => [
+                'group' => 'Payment methods',
+                'label' => 'Bank transfer fee (% of the payment)',
+                'help' => 'A percentage of the amount, added when a resident pays from a bank '
+                    .'account. A percentage rather than a fixed sum because that is how the '
+                    .'payment provider bills it: eCheck.Net is charged as a rate of 0.75% per '
+                    .'transaction, with no flat per-transaction fee. Setting this to 0.75 '
+                    .'recovers what a transfer costs and no more — $7.50 on a $1,000 payment, '
+                    .'50¢ on a $67 one. Leave at 0 to absorb it instead.',
+                'input' => 'number',
+                'min' => 0,
+                // Ours, not a scheme rule. Nothing caps an ACH fee the way the
+                // card brands cap a surcharge, but the cost is 0.75%: nearly
+                // triple that is a stray keystroke rather than a policy.
+                'max' => 2,
+                'step' => '0.01',
+                'warning' => 'Charged per payment, not per month. A resident paying weekly, or '
+                    .'paying rent and a deposit separately, pays it each time — right if it is '
+                    .'covering a cost, wrong if it reads as a penalty for paying in instalments. '
+                    .'The provider also bills a $10 monthly minimum for the service whether or not '
+                    .'anybody uses it, and that is not recoverable here. Never added to a housing '
+                    .'authority remittance.',
             ],
 
             /*

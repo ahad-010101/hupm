@@ -74,7 +74,12 @@ class PaymentController extends Controller
             // [WP-39, changed 2026-09-05] The percentage, not an amount — the
             // fee now depends on what they choose to pay, so the page works it
             // out as they type. Basis points keep the page off floats too.
-            'cardFeeBasisPoints' => $this->intents->feeBasisPoints(),
+            'cardFeeBasisPoints' => $this->intents->feeBasisPoints(Payment::METHOD_CARD),
+            // [WP-47] The bank rail charges a percentage too — eCheck.Net is
+            // billed as a rate, not a flat fee. Sent even when cards are
+            // switched off: the method radios are hidden then, but the fee is
+            // still charged and still has to be disclosed before they commit.
+            'echeckFeeBasisPoints' => $this->intents->feeBasisPoints(Payment::METHOD_ECHECK),
             'gatewayReady' => $this->gateway->isConfigured(),
             // One per render, so a double submit is one payment (AC-PAY-02).
             'idempotencyKey' => (string) Str::uuid(),

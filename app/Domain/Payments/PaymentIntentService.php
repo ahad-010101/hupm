@@ -45,56 +45,89 @@ class PaymentIntentService
     ) {}
 
     /**
-     * The fee for choosing this method, as a percentage of the payment.
-     * [WP-39, Q-7a — changed from a flat amount 2026-09-05]
+     * How each rail's fee is shaped, and the ceiling on each.  [WP-47, Q-7a/Q-7b]
      *
-     * Zero for a bank transfer, always. Public because the portal has to show
-     * the tenant the figure *before* they choose, and it must be the same
-     * figure the intent charges — two readings of one setting is how a
-     * disclosed fee and a charged fee drift apart.
+     * **Both rails are a percentage, because both cost a percentage.**
+     * Authorize.Net bills eCheck.Net as a *discount rate* — 0.75% of each
+     * transaction, with no per-transaction flat fee on the published plan — in
+     * exactly the way it bills cards, only cheaper. WP-47 first shipped ACH as
+     * a flat sum on the belief that a bank transfer costs a fixed ~25¢; that is
+     * true of ACH generally and not of this gateway, and the difference is not
+     * academic: a flat $2.50 overcharges the $67 tenant portion by fivefold and
+     * under-recovers on a $1,023 one.
      *
-     * **Basis points, and `prorate`, so no float ever touches it** (I-10).
-     * 2.9% is 290 basis points and the arithmetic is integer half-up: on
-     * $345.98 that is 34598 × 290 ÷ 10000 = $10.03, exactly, every time.
-     * Reading the percentage as a float and multiplying would give
-     * 10.033420000000001 and a fee that disagrees with itself between the
-     * screen and the charge.
+     * The two ceilings differ because they mean different things. **4% on a
+     * card is the card brands' rule** — a percentage there is a surcharge, and
+     * exceeding it is a breach of their operating regulations. **2% on a bank
+     * transfer is ours**: no scheme rule applies, but the cost is 0.75%, so
+     * nearly triple that is a typing mistake rather than a policy.
      */
-    public function convenienceFee(string $method, Money $amount): Money
-    {
-        if ($method !== Payment::METHOD_CARD) {
+    private const FEE_SETTING = [
+        Payment::METHOD_CARD => ['payments.card_convenience_fee_percent', 400],
+        Payment::METHOD_ECHECK => ['payments.echeck_fee_percent', 200],
+    ];
+
+    /**
+     * The fee for paying this way.  [WP-39, WP-47, Q-7a/Q-7b]
+     *
+     * One shape, two rates. Public because the portal has to show the figure
+     * *before* they choose, and it must be the same figure the intent charges —
+     * two readings of one setting is how a disclosed fee and a charged fee
+     * drift apart.
+     *
+     * **Never a float** (I-10). The percentage goes through `prorate`, integer
+     * half-up: 2.9% of $345.98 is 34598 × 290 ÷ 10000 = $10.03, exactly, every
+     * time, where a float gives 10.033420000000001.
+     */
+    public function convenienceFee(
+        string $method,
+        Money $amount,
+        string $payer = 'tenant',
+    ): Money {
+        // [WP-47] A fee is a RESIDENT-facing charge.
+        //
+        // A housing authority remits by bank transfer, so keying the ACH fee on
+        // method alone would start charging an agency a fee on public money —
+        // the thing WP-43 refused a card for, arriving by the back door the
+        // moment ACH gained a fee of its own.
+        if ($payer !== 'tenant' || ! $amount->isPositive()) {
             return Money::zero();
         }
 
-        $basisPoints = $this->feeBasisPoints();
+        $basisPoints = $this->feeBasisPoints($method);
 
-        if ($basisPoints === 0 || ! $amount->isPositive()) {
-            return Money::zero();
-        }
-
-        return $amount->prorate($basisPoints, 10_000);
+        return $basisPoints === 0
+            ? Money::zero()
+            : $amount->prorate($basisPoints, 10_000);
     }
 
     /**
-     * The configured percentage, in basis points.
+     * The configured percentage for a rail, in basis points.
      *
-     * Capped at 400 (4%) here as well as in the settings form. Card-brand
-     * rules cap a surcharge at 4%, and a setting edited straight into the
-     * database should not be able to exceed what the form refuses.
+     * Capped here as well as in the settings form, because a value edited
+     * straight into the database should not be able to exceed what the form
+     * refuses. An unknown method is charged nothing rather than defaulting to
+     * a rail's rate it did not ask for.
      */
-    public function feeBasisPoints(): int
+    public function feeBasisPoints(string $method): int
     {
-        $percent = $this->settings->string('payments.card_convenience_fee_percent', '0');
+        if (! isset(self::FEE_SETTING[$method])) {
+            return 0;
+        }
+
+        [$key, $ceiling] = self::FEE_SETTING[$method];
+
+        $percent = $this->settings->string($key, '0');
 
         // Through Money rather than a float: the setting is a decimal string
-        // like "2.90", and Money is the one place decimal strings are parsed.
-        // "2.90" parses to 290 minor units, which IS the basis-point figure —
+        // like "0.75", and Money is the one place decimal strings are parsed.
+        // "0.75" parses to 75 minor units, which IS the basis-point figure —
         // two decimal places of a percent is exactly one hundredth of a
         // percent. The coincidence is convenient and worth naming so nobody
         // "fixes" it later.
         $points = Money::fromString($percent === '' ? '0' : $percent)->minor;
 
-        return max(0, min(400, $points));
+        return max(0, min($ceiling, $points));
     }
 
     /**
@@ -165,10 +198,10 @@ class PaymentIntentService
         [$payment, $entry] = $this->recordIntent(
             $lease,
             $amount,
-            // The fee is a percentage of the RENT being paid, not of the total
-            // — charging a percentage of a figure that already includes the fee
-            // would compound it.
-            $this->convenienceFee($method, $amount),
+            // A percentage of the RENT being paid, not of the total — charging
+            // a percentage of a figure that already includes the fee would
+            // compound it.
+            $this->convenienceFee($method, $amount, $payer),
             $idempotencyKey,
             $method,
             $appliesTo,
@@ -272,8 +305,9 @@ class PaymentIntentService
         string $payer,
     ): array {
         return DB::transaction(function () use ($lease, $amount, $fee, $idempotencyKey, $method, $appliesTo, $payer) {
-            // [D-28] What the gateway will actually take. For eCheck the fee is
-            // zero and this is the rent, exactly as before.
+            // [D-28] What the gateway will actually take. When no fee is
+            // configured on the chosen rail this is the rent and nothing else,
+            // which is every payment taken before WP-39.
             $total = $amount->plus($fee);
 
             $payment = new Payment;

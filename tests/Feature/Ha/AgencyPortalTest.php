@@ -274,3 +274,29 @@ it('AC-HA-06 keeps everybody else out of the agency portal', function (string $r
 
     $this->actingAs($user)->get('/agency')->assertForbidden();
 })->with(['admin', 'tenant']);
+
+it('AC-PAY-23 charges an agency nothing now that the bank rail has a fee of its own', function () {
+    postSplitRent($this->lease);
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    // [WP-47] Until 8 Sep an agency was safe from the fee by accident: it pays
+    // by bank transfer and only cards were charged. Now the bank rail has a fee
+    // too, so the only thing between a HAP remittance and a charge on public
+    // money is the payer guard in convenienceFee(). This is the test that
+    // notices if it is ever removed.
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
+
+    $this->actingAs($this->officer)->postJson('/agency/pay', [
+        'lease_id' => $this->lease->id,
+        'amount' => '900.00',
+        'idempotency_key' => (string) Str::uuid(),
+    ])->assertOk();
+
+    $payment = Payment::sole();
+
+    expect($payment->payer)->toBe('housing_authority')
+        ->and($payment->convenience_fee)->toBeNull()
+        // Not $902.50. The agency is billed the remittance and nothing else.
+        ->and($payment->amount->toDecimalString())->toBe('900.00');
+});
