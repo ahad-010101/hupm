@@ -76,7 +76,7 @@ on:
         type: string
         required: true
       home_dir:
-        description: 'Account home, e.g. /home5/jabrilgino'
+        description: 'Account home, e.g. /home3/jabrilgino — NOT fixed; the host moves accounts between partitions'
         type: string
         required: true
       docroot:
@@ -331,6 +331,26 @@ jobs:
 
           # Prove the socket is live, so every later step is free.
           ssh -O check deploy
+
+          # The account's home partition is the host's to choose, not ours.
+          # HostGator moved this account from /home5 to /home3 on 8 Sep 2026
+          # with no notice, and left the old path behind as an EMPTY
+          # root-owned directory. So the upload did not fail with "no such
+          # file" — it failed with:
+          #
+          #     scp: dest open "/home5/***/app.tar.gz": Permission denied
+          #
+          # which says nothing about a partition, and the username is masked,
+          # so the one character that changed is the one you cannot see.
+          #
+          # Ask the server where home is and stop here with the answer, rather
+          # than three steps later with a riddle.
+          REMOTE_HOME=$(ssh -o BatchMode=yes deploy 'printf %s "$HOME"')
+
+          if [ "$REMOTE_HOME" != "${{ inputs.home_dir }}" ]; then
+            echo "::error::The account's home is now $REMOTE_HOME, not ${{ inputs.home_dir }} — the host has moved it between partitions. Change home_dir, deploy_path and docroot in the calling workflow to match, commit, and re-run. The application, its releases and shared/.env have moved with it; nothing is lost. Check the cron entry too: it holds an absolute path and will be pointing at the old one."
+            exit 1
+          fi
 
       - name: Upload
         run: |

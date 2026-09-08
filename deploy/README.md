@@ -15,9 +15,9 @@ The six values live in the caller files, in plain sight and diffable:
 
 | | HostGator | Hostinger |
 |---|---|---|
-| `home_dir` | `/home5/jabrilgino` | `/home/u529996195` |
-| `deploy_path` | `/home5/jabrilgino/hupm` | `/home/u529996195/hupm` |
-| `docroot` | `/home5/jabrilgino/public_html/website_0f94b77e` | `/home/u529996195/domains/saremcotech.com/public_html/demo` |
+| `home_dir` | `/home3/jabrilgino` | `/home/u529996195` |
+| `deploy_path` | `/home3/jabrilgino/hupm` | `/home/u529996195/hupm` |
+| `docroot` | `/home3/jabrilgino/public_html/website_0f94b77e` | `/home/u529996195/domains/saremcotech.com/public_html/demo` |
 | `php_cli` | `/usr/local/bin/php` | `/usr/bin/php` |
 | `app_url` | `https://headsuppm.com` | `https://demo.saremcotech.com` |
 | `ssh_port` | `2222` | `65002` |
@@ -51,7 +51,7 @@ so a subdomain's A record is created by hPanel — nothing to do at the registra
 ## 1. Server layout
 
 ```text
-/home5/jabrilgino/
+/home3/jabrilgino/
 ├── hupm -> releases/<id>                 symlink — swapped atomically
 ├── releases/
 │   ├── 20260827143000-aa4c015/           the live release
@@ -60,7 +60,7 @@ so a subdomain's A record is created by hPanel — nothing to do at the registra
 │   ├── .env                              chmod 600, written by hand, never deployed
 │   └── storage/                          documents, logs, sessions, cache
 └── public_html/website_0f94b77e/         cPanel Document Root — a REAL directory
-    ├── index.php                         paths rewritten to /home5/jabrilgino/hupm
+    ├── index.php                         paths rewritten to /home3/jabrilgino/hupm
     ├── .htaccess
     ├── build/                            Vite output
     ├── .well-known/                      AutoSSL — never deleted
@@ -179,17 +179,17 @@ demo) with `run_migrations` set to **true**.
 Then, on the server:
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 '/usr/local/bin/php /home5/jabrilgino/hupm/artisan key:generate'
+ssh -p 2222 jabrilgino@192.185.52.206 '/usr/local/bin/php /home3/jabrilgino/hupm/artisan key:generate'
 ```
 
 Seed — both are required, and neither is demo data:
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 'cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan db:seed --force'
+ssh -p 2222 jabrilgino@192.185.52.206 'cd /home3/jabrilgino/hupm && /usr/local/bin/php artisan db:seed --force'
 ```
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 'cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan db:seed --class="Database\Seeders\WorldSeeder" --force'
+ssh -p 2222 jabrilgino@192.185.52.206 'cd /home3/jabrilgino/hupm && /usr/local/bin/php artisan db:seed --class="Database\Seeders\WorldSeeder" --force'
 ```
 
 `db:seed` carries your settings and the public site's copy. `WorldSeeder` fills the
@@ -200,7 +200,7 @@ out, since it truncates and reloads rather than appending.
 Finally add the cron entry in cPanel → Cron Jobs, every minute:
 
 ```text
-* * * * * /usr/local/bin/php /home5/jabrilgino/hupm/artisan schedule:run >> /dev/null 2>&1
+* * * * * /usr/local/bin/php /home3/jabrilgino/hupm/artisan schedule:run >> /dev/null 2>&1
 ```
 
 **On `/health` after the first deploy:** it returns **503** when degraded, and it reports
@@ -234,11 +234,11 @@ the previous release serving.
 Run these yourself afterwards. They are all still built:
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 'cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:preflight'
+ssh -p 2222 jabrilgino@192.185.52.206 'cd /home3/jabrilgino/hupm && /usr/local/bin/php artisan hupm:preflight'
 ```
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 'cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan hupm:bank-data-sweep'
+ssh -p 2222 jabrilgino@192.185.52.206 'cd /home3/jabrilgino/hupm && /usr/local/bin/php artisan hupm:bank-data-sweep'
 ```
 
 ```bash
@@ -261,11 +261,11 @@ whenever you want the suite run against MySQL 8 on a clean machine.
 The last five releases stay on disk, and the swap is one symlink.
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 'ls -1dt /home5/jabrilgino/releases/*/'
+ssh -p 2222 jabrilgino@192.185.52.206 'ls -1dt /home3/jabrilgino/releases/*/'
 ```
 
 ```bash
-ssh -p 2222 jabrilgino@192.185.52.206 'ln -sfn /home5/jabrilgino/releases/<previous-id> /home5/jabrilgino/.hupm-next && mv -Tf /home5/jabrilgino/.hupm-next /home5/jabrilgino/hupm && cd /home5/jabrilgino/hupm && /usr/local/bin/php artisan optimize:clear && /usr/local/bin/php artisan config:cache && /usr/local/bin/php artisan route:cache && /usr/local/bin/php artisan view:cache'
+ssh -p 2222 jabrilgino@192.185.52.206 'ln -sfn /home3/jabrilgino/releases/<previous-id> /home3/jabrilgino/.hupm-next && mv -Tf /home3/jabrilgino/.hupm-next /home3/jabrilgino/hupm && cd /home3/jabrilgino/hupm && /usr/local/bin/php artisan optimize:clear && /usr/local/bin/php artisan config:cache && /usr/local/bin/php artisan route:cache && /usr/local/bin/php artisan view:cache'
 ```
 
 Two things that rollback does **not** undo:

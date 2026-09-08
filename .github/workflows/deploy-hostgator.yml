@@ -28,13 +28,22 @@ jobs:
     with:
       environment: production
 
-      home_dir: /home5/jabrilgino
-      deploy_path: /home5/jabrilgino/hupm
+      # ⚠ THE HOME PARTITION IS NOT OURS AND IT MOVES. This was /home5 until
+      # 8 Sep 2026, when HostGator migrated the account to /home3 without
+      # notice. The old path is left behind as an EMPTY root-owned directory,
+      # so the deploy does not fail with "no such file" — scp fails with
+      # "Permission denied" and nothing anywhere says why.
+      #
+      # The core workflow now asks the server where $HOME is before uploading
+      # and stops with that answer if it disagrees with these three lines. If
+      # you are reading this because of that error, change the partition here.
+      home_dir: /home3/jabrilgino
+      deploy_path: /home3/jabrilgino/hupm
 
       # cPanel's own Document Root for headsuppm.com, and it cannot be
       # repointed at the application's public/ — hence the split-root handling
       # in the core workflow.
-      docroot: /home5/jabrilgino/public_html/website_0f94b77e
+      docroot: /home3/jabrilgino/public_html/website_0f94b77e
 
       # Absolute, never bare `php`. cron with a wrong PHP path is the single
       # most common shared-hosting failure and it fails silently (R-5).

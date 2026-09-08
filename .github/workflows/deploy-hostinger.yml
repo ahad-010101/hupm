@@ -12,7 +12,7 @@ name: Deploy — Hostinger (demo.saremcotech.com)
 # HOW HOSTINGER DIFFERS FROM HOSTGATOR, since the two are easy to conflate:
 #
 #   - SSH is on 65002, not 2222.
-#   - The account root is /home/u<digits>, not /home5/<name>.
+#   - The account root is /home/u<digits>, not /homeN/<name>.
 #   - A subdomain lives under domains/<parent>/public_html/<sub>, so the
 #     document root is a path INSIDE the parent domain rather than a generated
 #     directory beside it.

@@ -8,8 +8,8 @@
 # them is how the second server silently gets the first server's directories.
 #
 #   HostGator / cPanel
-#     HOME_DIR=/home5/jabrilgino \
-#     DOCROOT=/home5/jabrilgino/public_html/website_0f94b77e \
+#     HOME_DIR=/home3/jabrilgino \
+#     DOCROOT=/home3/jabrilgino/public_html/website_0f94b77e \
 #     PHP=/usr/local/bin/php \
 #     bash server-setup.sh
 #
