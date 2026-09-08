@@ -1,6 +1,7 @@
 <?php
 
 use App\Domain\Payments\AllocationOrderRegistry;
+use App\Domain\Payments\PaymentIntentService;
 use App\Domain\Settings\SettingsCatalogue;
 use App\Models\Tenant;
 use App\Models\User;
@@ -238,4 +239,40 @@ it('keeps residents out of the settings entirely', function () {
     $this->actingAs($resident)
         ->post('/admin/settings/confirm', ['key' => 'fees.automation_enabled'])
         ->assertForbidden();
+});
+
+it('AC-CHG-12 accepts a fractional percentage for the card fee', function () {
+    // The bug this exists for: `accepts()` validated every number with
+    // ctype_digit, so "2.9" was refused by the server — and the form rendered
+    // type="number" with no step, so the browser refused it first. A card fee
+    // that can only be a whole percent is not a fee anybody prices with.
+    $this->actingAs($this->admin)
+        ->patch('/admin/settings', ['key' => 'payments.card_convenience_fee_percent', 'value' => '2.9'])
+        ->assertSessionHasNoErrors();
+
+    expect(app(Settings::class)->string('payments.card_convenience_fee_percent'))->toBe('2.9')
+        // And it reaches the fee calculation as 290 basis points, not 2.
+        ->and(app(PaymentIntentService::class)->feeBasisPoints())->toBe(290);
+});
+
+it('AC-CHG-12 still refuses more precision than the step allows, and more than the cap', function () {
+    foreach (['2.999', '4.01', '-1', 'abc'] as $bad) {
+        $this->actingAs($this->admin)
+            ->patch('/admin/settings', ['key' => 'payments.card_convenience_fee_percent', 'value' => $bad])
+            ->assertSessionHasErrors('value');
+    }
+
+    expect(app(Settings::class)->string('payments.card_convenience_fee_percent'))->toBe('0.00');
+});
+
+it('AC-CHG-12 keeps whole-number settings integer-only', function () {
+    // Decimals are opt-in through `step`. "The 5.5th of the month" is not a
+    // date, and nothing else in the catalogue should have loosened.
+    $this->actingAs($this->admin)
+        ->patch('/admin/settings', ['key' => 'delinquency.trigger_day', 'value' => '5.5'])
+        ->assertSessionHasErrors('value');
+
+    $this->actingAs($this->admin)
+        ->patch('/admin/settings', ['key' => 'delinquency.trigger_day', 'value' => '7'])
+        ->assertSessionHasNoErrors();
 });

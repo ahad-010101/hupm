@@ -214,6 +214,11 @@ class SettingsCatalogue
                 'input' => 'number',
                 'min' => 0,
                 'max' => 4,
+                // The only fractional setting in the catalogue. Without it the
+                // browser's default of step="1" refuses 2.9, and `accepts()`
+                // refuses it a second time — a percentage that can only be a
+                // whole number is not a percentage anybody prices with.
+                'step' => '0.01',
                 // Stated once, plainly, where the decision is made. This is a
                 // surcharge in card-brand terms, not a convenience fee, and
                 // the difference is not cosmetic.
@@ -305,14 +310,67 @@ class SettingsCatalogue
         return match ($spec['input']) {
             'select' => array_key_exists($value, $spec['options'] ?? []),
             'bool' => in_array($value, ['true', 'false'], true),
-            'number' => ctype_digit($value)
-                && (int) $value >= ($spec['min'] ?? 0)
-                && (int) $value <= ($spec['max'] ?? PHP_INT_MAX),
+            'number' => $this->acceptsNumber($value, $spec),
             // Long-form copy for the public site. The column is TEXT, but a
             // ceiling still applies — a settings row is not a document store.
             'textarea' => mb_strlen($value) <= ($spec['max'] ?? 5000),
             // Free text still has a ceiling; the column is not unbounded.
             default => mb_strlen($value) <= 255,
         };
+    }
+
+    /**
+     * A numeric setting, whole or fractional.
+     *
+     * A setting is integer-only unless it declares a fractional `step`. That
+     * keeps `delinquency.trigger_day` and the rest exactly as strict as they
+     * were — "the 5.5th of the month" is not a date — while letting the card
+     * fee be the 2.9% that card processing actually costs.
+     *
+     * **Compared as a scaled integer, never a float.** This value becomes money
+     * the moment it is applied to a payment, and 2.9 is not exactly
+     * representable in binary floating point (I-10). Parsed the same way
+     * `Money::fromString()` parses a decimal string: whole part times the
+     * scale, plus a zero-padded fraction.
+     *
+     * @param  array<string, mixed>  $spec
+     */
+    private function acceptsNumber(string $value, array $spec): bool
+    {
+        $decimals = $this->decimalsAllowedBy($spec);
+
+        $pattern = $decimals === 0
+            ? '/^\d{1,9}$/'
+            : '/^\d{1,9}(\.\d{1,'.$decimals.'})?$/';
+
+        if (! preg_match($pattern, $value)) {
+            return false;
+        }
+
+        $scale = 10 ** $decimals;
+        [$whole, $fraction] = array_pad(explode('.', $value, 2), 2, '');
+
+        $scaled = (int) $whole * $scale + (int) str_pad($fraction, $decimals, '0');
+
+        return $scaled >= ($spec['min'] ?? 0) * $scale
+            && $scaled <= ($spec['max'] ?? PHP_INT_MAX / $scale) * $scale;
+    }
+
+    /**
+     * How many decimal places this setting's `step` permits.
+     *
+     * Read from the step rather than configured separately, so the number the
+     * form offers and the number the server accepts cannot disagree — which is
+     * the failure this whole method exists to fix.
+     *
+     * @param  array<string, mixed>  $spec
+     */
+    private function decimalsAllowedBy(array $spec): int
+    {
+        $step = (string) ($spec['step'] ?? '1');
+
+        return str_contains($step, '.')
+            ? strlen(rtrim(explode('.', $step, 2)[1], '0'))
+            : 0;
     }
 }

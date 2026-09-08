@@ -59,6 +59,10 @@ class SettingController extends Controller
                     'options' => $spec['options'] ?? null,
                     'min' => $spec['min'] ?? null,
                     'max' => $spec['max'] ?? null,
+                    // Whole numbers unless the setting says otherwise. The
+                    // browser defaults `step` to 1 and silently refuses 2.9
+                    // without this.
+                    'step' => $spec['step'] ?? null,
                     'warning' => $spec['warning'] ?? null,
                     // The Q-number and the spec wording, straight from the
                     // seeded row — it is what the register calls this decision.

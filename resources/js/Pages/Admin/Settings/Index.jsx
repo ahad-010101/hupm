@@ -75,6 +75,9 @@ function Field({ setting, onSaved }) {
                 value={form.data.value}
                 min={setting.min ?? undefined}
                 max={setting.max ?? undefined}
+                // Without this the browser applies step="1" and rejects 2.9 on
+                // a percentage, with no message anybody can see.
+                step={setting.step ?? undefined}
                 onChange={(e) => form.setData('value', e.target.value)}
                 className="min-h-touch w-full rounded-md border-gray-300 text-base sm:w-96"
             />
