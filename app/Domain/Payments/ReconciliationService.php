@@ -467,13 +467,15 @@ class ReconciliationService
     }
 
     /**
-     * The card convenience fee for this payment.  [WP-39, Q-7a]
+     * The convenience fee for this payment.  [WP-39, WP-47, Q-7a/Q-7b]
      *
      * Tenant only. A fee never touches the Housing Authority portion (I-7's
-     * reasoning, and the HA does not pay by card in any case). Idempotent on
-     * the payment id via the charge key, so re-running reconciliation over the
-     * same settlement — which happens every day for ten days — cannot charge
-     * twice (AC-PAY-12).
+     * reasoning), and since WP-47 gave the bank rail a fee of its own that
+     * guard is the only thing standing between a HAP remittance and a charge —
+     * an agency pays by bank transfer, so "the HA does not pay by card" stopped
+     * being the reason on 8 Sep. Idempotent on the payment id via the charge
+     * key, so re-running reconciliation over the same settlement — which
+     * happens every day for ten days — cannot charge twice (AC-PAY-12).
      */
     private function postConvenienceFee(Payment $payment): ?LedgerEntry
     {
@@ -489,7 +491,15 @@ class ReconciliationService
             'convenience_fee',
             'tenant',
             $fee,
-            'Card payment fee',
+            // Named for the rail that incurred it. A resident reading their
+            // ledger should recognise the line, and "Card payment fee" against
+            // a bank transfer is simply untrue.
+            $payment->method === Payment::METHOD_CARD
+                ? 'Card payment fee'
+                : 'Bank transfer fee',
+            // The key stays `convfee` whichever rail it was. It is an
+            // idempotency key, not a description, and rewording it would let
+            // the same payment be charged a second time under a new name.
             "{$lease->id}:convfee:pmt{$payment->id}",
             $this->calendar->today(),
         );

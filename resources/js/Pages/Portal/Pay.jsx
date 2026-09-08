@@ -55,6 +55,7 @@ export default function Pay({
     leaseId,
     cardsEnabled = false,
     cardFeeBasisPoints = 0,
+    echeckFeeCents = 0,
     depositDue = '0.00',
 }) {
     const owed = toCents(balance) ?? 0;
@@ -76,19 +77,29 @@ export default function Pay({
     const [amount, setAmount] = useState(arrearsCents > 0 ? fromCents(arrearsCents) : '');
     const [method, setMethod] = useState('echeck');
 
-    // The fee is only ever added to a card payment, and only when one is set.
-    // A percentage of what they are paying, so it moves as they type. Integer
-    // half-up on basis points, matching PaymentIntentService::convenienceFee()
-    // exactly — the figure on this screen has to be the figure charged, and a
-    // float here would disagree with the server's integer arithmetic by a cent
-    // often enough to matter.
+    // Each rail carries its own fee and they are different shapes: the card is
+    // a percentage of what they are paying, so it moves as they type; the bank
+    // transfer is a flat sum, because that is what it costs whatever the
+    // amount.
+    //
+    // Integer half-up on basis points, matching
+    // PaymentIntentService::convenienceFee() exactly — the figure on this
+    // screen has to be the figure charged, and a float here would disagree with
+    // the server's integer arithmetic by a cent often enough to matter.
+    //
+    // Nothing is charged on an empty or zero amount, mirroring the server's
+    // `isPositive()` guard — otherwise a flat fee would sit on the screen
+    // before they have typed anything to pay.
     const amountCents = toCents(amount) ?? 0;
     const feeCents =
-        method === 'card' && cardFeeBasisPoints > 0
-            ? Math.floor((amountCents * cardFeeBasisPoints * 2 + 10000) / 20000)
-            : 0;
+        amountCents <= 0
+            ? 0
+            : method === 'card'
+              ? Math.floor((amountCents * cardFeeBasisPoints * 2 + 10000) / 20000)
+              : echeckFeeCents;
     const totalCents = amountCents + feeCents;
     const feePercentLabel = (cardFeeBasisPoints / 100).toFixed(2).replace(/\.?0+$/, '');
+    const feeLabel = method === 'card' ? `Card fee (${feePercentLabel}%)` : 'Bank transfer fee';
 
     // A saved bank account cannot pay a card transaction and the reverse is
     // equally true, so the list follows the choice rather than offering
@@ -351,7 +362,10 @@ export default function Pay({
                                             {
                                                 value: 'echeck',
                                                 label: 'Bank account',
-                                                note: 'No fee.',
+                                                note:
+                                                    echeckFeeCents > 0
+                                                        ? `A ${formatMoney(fromCents(echeckFeeCents)).text} fee is added.`
+                                                        : 'No fee.',
                                             },
                                             {
                                                 value: 'card',
@@ -397,7 +411,7 @@ export default function Pay({
                                         </dd>
                                     </div>
                                     <div className="flex justify-between gap-4">
-                                        <dt className="text-gray-700">Card fee ({feePercentLabel}%)</dt>
+                                        <dt className="text-gray-700">{feeLabel}</dt>
                                         <dd>
                                             <Money value={fromCents(feeCents)} />
                                         </dd>

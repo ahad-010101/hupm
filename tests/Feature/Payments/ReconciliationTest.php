@@ -744,3 +744,41 @@ it('AC-PAY-21 still charges the returned fee on a bounced eCheck', function () {
         ->and(LedgerEntry::where('category', 'returned_fee')->count())->toBe(1)
         ->and(DB::table('audit_logs')->where('action', 'payment.card_disputed')->count())->toBe(0);
 });
+
+it('AC-PAY-23 names the settled fee for the rail that incurred it', function () {
+    // A bank transfer with a fee: $500 of rent plus $2.50, the WP-47 shape.
+    $payment = Payment::factory()->create([
+        'lease_id' => $this->lease->id,
+        'tenant_id' => $this->tenant->id,
+        'amount' => '502.50',
+        'convenience_fee' => '2.50',
+        'method' => 'echeck',
+        'gateway' => 'authorize_net',
+        'gateway_transaction_id' => '60777666555',
+        'idempotency_key' => (string) Str::uuid(),
+        'submitted_at' => now()->subDays(2),
+    ]);
+
+    $this->ledger->postPayment(
+        $this->lease, 'tenant', Money::fromString('502.50'),
+        'Payment submitted online', $payment->id, 'pending',
+    );
+
+    $this->batches = ['B1' => [settledTransaction('60777666555', ['settleAmount' => '502.50'])]];
+
+    $this->reconciliation->run();
+
+    $fee = LedgerEntry::where('category', 'convenience_fee')->sole();
+
+    expect($fee->amount->toDecimalString())->toBe('2.50')
+        // "Card payment fee" against a bank transfer is simply untrue, and the
+        // ledger is the one place a resident goes to check what they were
+        // charged for.
+        ->and($fee->description)->toBe('Bank transfer fee')
+        // The key is unchanged by the rewording — it is an idempotency key, and
+        // renaming it would let the same payment be charged twice under a new
+        // name (D-01).
+        ->and($fee->charge_key)->toBe("{$this->lease->id}:convfee:pmt{$payment->id}")
+        // +500 rent, −502.50 payment, +2.50 fee.
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
+});

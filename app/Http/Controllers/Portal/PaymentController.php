@@ -75,6 +75,11 @@ class PaymentController extends Controller
             // fee now depends on what they choose to pay, so the page works it
             // out as they type. Basis points keep the page off floats too.
             'cardFeeBasisPoints' => $this->intents->feeBasisPoints(),
+            // [WP-47] The bank rail's fee, in cents, because it is a flat sum
+            // rather than a rate. Sent even when cards are switched off — the
+            // method radios are hidden then, but the fee is still charged and
+            // still has to be disclosed before they commit.
+            'echeckFeeCents' => $this->intents->echeckFee()->minor,
             'gatewayReady' => $this->gateway->isConfigured(),
             // One per render, so a double submit is one payment (AC-PAY-02).
             'idempotencyKey' => (string) Str::uuid(),

@@ -214,10 +214,10 @@ class SettingsCatalogue
                 'input' => 'number',
                 'min' => 0,
                 'max' => 4,
-                // The only fractional setting in the catalogue. Without it the
-                // browser's default of step="1" refuses 2.9, and `accepts()`
-                // refuses it a second time — a percentage that can only be a
-                // whole number is not a percentage anybody prices with.
+                // Fractional. Without it the browser's default of step="1"
+                // refuses 2.9, and `accepts()` refuses it a second time — a
+                // percentage that can only be a whole number is not a
+                // percentage anybody prices with.
                 'step' => '0.01',
                 // Stated once, plainly, where the decision is made. This is a
                 // surcharge in card-brand terms, not a convenience fee, and
@@ -228,6 +228,28 @@ class SettingsCatalogue
                     .'cards may not be surcharged at all — this system cannot tell debit from credit '
                     .'before the payment is taken, so every card is charged the same. Take advice '
                     .'before setting this above zero.',
+            ],
+            'payments.echeck_fee_flat' => [
+                'group' => 'Payment methods',
+                'label' => 'Bank transfer fee (flat)',
+                'help' => 'A fixed amount added when a resident pays from a bank account, whatever '
+                    .'the payment. Flat rather than a percentage because a bank transfer costs '
+                    .'about 25¢ regardless of size — a percentage of a $1,000 rent payment would be '
+                    .'a markup, not a recovery. They see it before they confirm and it posts to '
+                    .'their ledger as its own line. Leave at 0 to absorb the cost.',
+                'input' => 'number',
+                'min' => 0,
+                // A ceiling on the typing, not a policy. Nothing in law caps
+                // this the way the card brands cap a surcharge; $25 is simply
+                // further than any honest ACH fee goes, and it stops a stray
+                // keystroke charging a resident $500.
+                'max' => 25,
+                'step' => '0.01',
+                'warning' => 'This is charged per payment, not per month. A resident paying weekly, '
+                    .'or paying rent and a deposit separately, pays it each time — which is the '
+                    .'right answer if it is covering a cost, and the wrong one if it reads as a '
+                    .'penalty for paying in instalments. It is never added to a housing authority '
+                    .'remittance.',
             ],
 
             /*

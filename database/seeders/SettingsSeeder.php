@@ -45,6 +45,8 @@ class SettingsSeeder extends Seeder
                 'Q-7 (closed 2026-09-04, yes). Cards ship switched off; turning this on offers them alongside ACH (WP-39).'],
             ['payments.card_convenience_fee_percent', '0.00', 'string', true,
                 'Q-7a (changed from a flat amount 2026-09-05). Percentage of the payment added to a card transaction, posted as its own ledger line. Capped at 4% — it is a surcharge in card-brand terms. 0.00 means the landlord absorbs the cost.'],
+            ['payments.echeck_fee_flat', '0.00', 'string', true,
+                'Q-7b (added 2026-09-08, WP-47). Flat amount added to a bank-transfer payment, posted as its own ledger line. Flat rather than a percentage because ACH costs a fixed sum whatever the amount. 0.00 means the landlord absorbs the cost. Never applied to a housing authority remittance.'],
             ['payments.overpayment_behaviour', 'credit_forward', 'string', true,
                 'Q-8. What happens to an overpayment remainder: credit_forward or refund.'],
 
