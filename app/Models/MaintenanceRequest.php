@@ -63,6 +63,9 @@ class MaintenanceRequest extends Model
             'permission_to_enter' => 'boolean',
             'pets_present' => 'boolean',
             'is_emergency' => 'boolean',
+            // [WP-46] Work the resident is not meant to see. Cast so the
+            // notification guard and the portal filter both read a real bool.
+            'internal' => 'boolean',
             // [WP-45] Two different facts. `cost_amount` is what the landlord
             // paid and never reaches a resident; `billed_amount` is what the
             // resident was charged, and is usually null.

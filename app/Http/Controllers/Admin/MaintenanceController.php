@@ -6,6 +6,8 @@ use App\Domain\Maintenance\MaintenanceService;
 use App\Domain\Maintenance\TicketBillingService;
 use App\Domain\Maintenance\TicketStateMachine;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\CreateMaintenanceRequest;
+use App\Models\Lease;
 use App\Models\MaintenanceAttachment;
 use App\Models\MaintenanceRequest as Ticket;
 use App\Models\Vendor;
@@ -13,6 +15,7 @@ use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -34,6 +37,108 @@ class MaintenanceController extends Controller
         private readonly TicketStateMachine $states,
         private readonly TicketBillingService $billing,
     ) {}
+
+    /**
+     * The form for raising a repair on somebody's behalf.  [WP-46]
+     *
+     * Active leases only — a ticket against an ended tenancy has no unit to
+     * attend and no resident to tell.
+     */
+    public function create(): Response
+    {
+        return Inertia::render('Admin/Maintenance/Create', [
+            'categories' => Ticket::CATEGORIES,
+
+            'leases' => Lease::query()
+                ->where('status', Lease::STATUS_ACTIVE)
+                ->with(['tenant:id,first_name,last_name,phone', 'unit:id,unit_number,property_id', 'unit.property:id,name'])
+                ->get()
+                ->map(fn (Lease $lease) => [
+                    'id' => $lease->id,
+                    'tenant' => $lease->tenant?->fullName(),
+                    // Pre-filled on the form so the office is not looking the
+                    // number up on another screen while somebody waits.
+                    'phone' => $lease->tenant?->phone,
+                    'property' => $lease->unit?->property?->name,
+                    'unit' => $lease->unit?->unit_number,
+                ])
+                ->sortBy(['property', 'unit'])
+                ->values(),
+
+            'vendors' => Vendor::query()
+                ->where('active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'trade'])
+                ->map(fn (Vendor $v) => [
+                    'id' => $v->id,
+                    'label' => $v->trade ? "{$v->name} ({$v->trade})" : $v->name,
+                ]),
+        ]);
+    }
+
+    /**
+     * Raise it.  [WP-46, FR-MNT-01]
+     *
+     * Three existing services in sequence, none of them changed: `submit()`
+     * numbers and files the ticket, `assignVendor()` moves it to assigned and
+     * puts that on the timeline, `billResident()` posts the charge. One
+     * transaction, so a ticket is never left half-raised.
+     */
+    public function store(CreateMaintenanceRequest $request): RedirectResponse
+    {
+        $lease = $request->lease();
+
+        $ticket = DB::transaction(function () use ($request, $lease) {
+            // `internal` travels IN, so submit() writes it before it sends the
+            // acknowledgement. Setting it afterwards would be one email too
+            // late — the exact leak this flag exists to prevent.
+            $ticket = $this->maintenance->submit(
+                $lease,
+                [...$request->ticketAttributes(), 'internal' => $request->boolean('internal')],
+                [],
+                $request->user(),
+            );
+
+            if ($request->filled('vendor_id')) {
+                // Triage first, because the state machine requires it:
+                // submitted → triaged → assigned, and `assignVendor()` skips
+                // the status move silently when the jump is illegal.
+                //
+                // Not a workaround. An admin who has read the problem and
+                // chosen who should attend HAS triaged it — that is what triage
+                // is. Recording it as a real transition keeps the timeline
+                // honest rather than teaching the state machine a shortcut that
+                // would then be available everywhere.
+                $this->maintenance->transition(
+                    $ticket,
+                    Ticket::STATUS_TRIAGED,
+                    $request->user(),
+                    'Triaged when raised by the office.',
+                );
+
+                $this->maintenance->assignVendor(
+                    $ticket,
+                    Vendor::findOrFail($request->integer('vendor_id')),
+                    $request->user(),
+                );
+            }
+
+            if ($request->boolean('bill_resident')) {
+                $this->billing->billResident(
+                    $ticket,
+                    $request->billedAmount(),
+                    $request->string('billed_reason')->value(),
+                    $request->user(),
+                );
+            }
+
+            return $ticket;
+        });
+
+        return redirect()
+            ->route('admin.maintenance.show', $ticket->id)
+            ->with('status', "Ticket {$ticket->ticket_number} raised.");
+    }
 
     /** API-ADM-21. */
     public function index(Request $request): Response

@@ -380,6 +380,10 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
 
         // Maintenance (API-ADM-21…25). The queue is worked from a phone.
         Route::get('maintenance', [MaintenanceController::class, 'index'])->name('maintenance.index');
+        // [WP-46] `new` before `{maintenance}`, so it cannot be read as a
+        // ticket id — the same ordering the portal follows above.
+        Route::get('maintenance/new', [MaintenanceController::class, 'create'])->name('maintenance.create');
+        Route::post('maintenance', [MaintenanceController::class, 'store'])->name('maintenance.store');
         Route::get('maintenance/{maintenance}', [MaintenanceController::class, 'show'])
             ->whereNumber('maintenance')->name('maintenance.show');
         Route::patch('maintenance/{maintenance}/status', [MaintenanceController::class, 'transition'])

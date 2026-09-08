@@ -31,6 +31,24 @@ class HousingAuthority extends Model
         'remittance_type',
     ];
 
+    /**
+     * The portal accounts speaking for this agency.  [WP-43]
+     *
+     * Plural because an agency is an office, not a person — a housing officer
+     * leaving should not take the login with them. `hasPortalAccess()` asks the
+     * question the screen actually needs.
+     */
+    public function users(): HasMany
+    {
+        return $this->hasMany(User::class);
+    }
+
+    /** True once an account exists and a password has been set. */
+    public function hasPortalAccess(): bool
+    {
+        return $this->users()->where('status', User::STATUS_ACTIVE)->exists();
+    }
+
     public function leases(): HasMany
     {
         return $this->hasMany(Lease::class);

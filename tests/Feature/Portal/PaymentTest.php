@@ -715,7 +715,7 @@ it('AC-PAY-16 refuses a card payment while cards are switched off', function () 
 
 it('AC-PAY-17 charges the gateway the rent plus the fee, and records both', function () {
     app(Settings::class)->set('payments.cards_enabled', 'true');
-    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '2.90');
 
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
 
@@ -725,8 +725,12 @@ it('AC-PAY-17 charges the gateway the rent plus the fee, and records both', func
     $payment = Payment::sole();
 
     // [D-28] `amount` is what the gateway takes, not the rent portion.
-    expect($payment->amount->toDecimalString())->toBe('350.93')
-        ->and($payment->fee()->toDecimalString())->toBe('4.95')
+    //
+    // 2.90% of $345.98 is 34598 x 290 / 10000 = 1003.342, half-up to 1003
+    // cents. Worked in integers throughout (I-10) — a float would give
+    // 10.033420000000001 and a fee that disagreed with itself.
+    expect($payment->amount->toDecimalString())->toBe('356.01')
+        ->and($payment->fee()->toDecimalString())->toBe('10.03')
         ->and($payment->rentPortion()->toDecimalString())->toBe('345.98')
         ->and($payment->method)->toBe('card')
         // I-6 still: submitting is not paying, whatever the instrument.
@@ -760,7 +764,7 @@ it('AC-PAY-17 asks the gateway for card fields and no bank fields', function () 
 
 it('AC-PAY-18 charges no fee on a bank transfer, however the fee is set', function () {
     app(Settings::class)->set('payments.cards_enabled', 'true');
-    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '2.90');
 
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
 
@@ -776,10 +780,10 @@ it('AC-PAY-18 charges no fee on a bank transfer, however the fee is set', functi
 
 it('AC-PAY-19 evaluates the lease policy on the rent, not on the rent plus fee', function () {
     app(Settings::class)->set('payments.cards_enabled', 'true');
-    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '2.90');
 
     // full_only: the tenant must pay the whole $500 balance and nothing else
-    // will do. With the fee added the gateway takes $504.95, and if the policy
+    // will do. With the fee added the gateway takes $514.50, and if the policy
     // saw that number it would reject a payment that is exactly correct.
     $this->lease->forceFill(['partial_payment_policy' => 'full_only'])->save();
 
@@ -788,5 +792,32 @@ it('AC-PAY-19 evaluates the lease policy on the rent, not on the rent plus fee',
     $this->postJson('/portal/pay', payPayload(['amount' => '500.00', 'method' => 'card']))
         ->assertOk();
 
-    expect(Payment::sole()->amount->toDecimalString())->toBe('504.95');
+    expect(Payment::sole()->amount->toDecimalString())->toBe('514.50');
+});
+
+it('AC-CHG-11 works the card fee in integers, so the screen and the charge agree', function () {
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '2.90');
+
+    $intents = app(PaymentIntentService::class);
+
+    // 2.9% of $345.98 is 34598 x 290 / 10000 = 1003.342, half-up to $10.03.
+    // A float would give 10.033420000000001 and a fee that disagreed with
+    // itself between the page and the payment row (I-10).
+    expect($intents->convenienceFee('card', Money::fromString('345.98'))->toDecimalString())
+        ->toBe('10.03')
+        // Exact halves round up, not to even.
+        ->and($intents->convenienceFee('card', Money::fromString('100.00'))->toDecimalString())
+        ->toBe('2.90')
+        // A bank transfer is never charged, whatever the percentage is set to.
+        ->and($intents->convenienceFee('echeck', Money::fromString('345.98'))->toDecimalString())
+        ->toBe('0.00');
+});
+
+it('AC-CHG-11 clamps the percentage at 4, whatever the database says', function () {
+    // Card-brand rules cap a surcharge at 4%. The settings form refuses more;
+    // this is the second guard, for a value edited straight into the table.
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '25.00');
+
+    expect(app(PaymentIntentService::class)->feeBasisPoints())->toBe(400);
 });

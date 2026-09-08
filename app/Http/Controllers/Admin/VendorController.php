@@ -42,6 +42,7 @@ class VendorController extends Controller
                     MaintenanceRequest::STATUS_CANCELLED,
                 ])])
                 ->withCount('requests')
+                ->with('users:id,vendor_id,status')
                 ->orderBy('name')
                 ->get()
                 ->map(fn (Vendor $vendor) => [
@@ -54,6 +55,10 @@ class VendorController extends Controller
                     'active' => $vendor->active,
                     'open_requests' => $vendor->open_requests_count,
                     'total_requests' => $vendor->requests_count,
+                    // [WP-44] Null means no account exists — which is still a
+                    // complete contractor. NG-6 was reversed, not replaced: a
+                    // login is offered, never required.
+                    'account_status' => $vendor->users->first()?->status,
                 ])
                 ->all(),
             'filters' => ['inactive' => $showInactive],

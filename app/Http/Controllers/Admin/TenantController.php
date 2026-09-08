@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Domain\Auth\InvitationService;
+use App\Domain\Ledger\BalanceCalculator;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\TenantRequest;
 use App\Models\Tenant;
@@ -101,7 +102,7 @@ class TenantController extends Controller
             ->with('status', "{$tenant->fullName()} was added.");
     }
 
-    public function show(Tenant $tenant): Response
+    public function show(Tenant $tenant, BalanceCalculator $balances): Response
     {
         $tenant->load([
             'users:id,tenant_id,email,status,last_login_at',
@@ -109,6 +110,24 @@ class TenantController extends Controller
         ]);
 
         return Inertia::render('Admin/Tenants/Show', [
+            /*
+             | [WP-46] What they owe, on the page people open to find out.
+             |
+             | The same four figures the ledger screen shows
+             | (Admin/LedgerController:71-73), from the same calculators, so the
+             | two pages cannot disagree. Nothing is computed here — I-1 holds:
+             | a balance is a SUM over ledger rows at read time, never stored.
+             |
+             | I-4 does not apply: this is the admin console, where the housing
+             | authority portion is deliberately visible (§5.3).
+             */
+            'balances' => [
+                'tenant' => (string) $balances->tenantBalance($tenant->id),
+                'ha' => (string) $balances->haBalance($tenant->id),
+                // Beside the balance, never inside it (I-6).
+                'pending' => (string) $balances->pendingPayments($tenant->id),
+                'deposit' => (string) $balances->depositBalance($tenant->id),
+            ],
             'tenant' => [
                 ...$tenant->only([
                     'id', 'first_name', 'last_name', 'email', 'phone',

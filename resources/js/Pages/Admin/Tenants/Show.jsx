@@ -9,7 +9,14 @@ import Alert from '@/Components/Alert';
 import Money from '@/Components/Money';
 
 /** Tenant detail: contact, portal account, leases.  [FR-REG-02, API-ADM-07] */
-export default function Show({ tenant, account, leases, flash = {}, errors = {} }) {
+export default function Show({
+    tenant,
+    account,
+    leases,
+    balances = { tenant: '0.00', ha: '0.00', pending: '0.00', deposit: '0.00' },
+    flash = {},
+    errors = {},
+}) {
     const invite = useForm({});
     const [confirmingArchive, setConfirmingArchive] = useState(false);
     const [archiving, setArchiving] = useState(false);
@@ -66,6 +73,46 @@ export default function Show({ tenant, account, leases, flash = {}, errors = {} 
                     {errors.invite || errors.tenant}
                 </Alert>
             )}
+
+            {/* [WP-46] What they owe, first, because it is what this page is
+                usually opened to find out. Same four figures as their ledger
+                screen, from the same calculators — the two cannot disagree. */}
+            <section className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <h2 className="text-sm text-gray-600">Balance</h2>
+                        <p className="mt-1 text-3xl">
+                            {/* `balance` renders a negative as "Credit $X" in
+                                green — never as a minus figure. */}
+                            <Money value={balances.tenant} balance />
+                        </p>
+                    </div>
+
+                    <dl className="flex flex-wrap gap-x-8 gap-y-2">
+                        {balances.pending !== '0.00' && (
+                            <div>
+                                <dt className="text-sm text-gray-600">Payments processing</dt>
+                                {/* Beside the balance, never inside it (I-6). */}
+                                <dd className="text-base"><Money value={balances.pending} /></dd>
+                            </div>
+                        )}
+                        {balances.deposit !== '0.00' && (
+                            <div>
+                                <dt className="text-sm text-gray-600">Deposit outstanding</dt>
+                                <dd className="text-base"><Money value={balances.deposit} /></dd>
+                            </div>
+                        )}
+                        {balances.ha !== '0.00' && (
+                            <div>
+                                {/* Admin console only. I-4 keeps this off every
+                                    resident-facing screen, not off this one. */}
+                                <dt className="text-sm text-gray-600">Housing authority owes</dt>
+                                <dd className="text-base"><Money value={balances.ha} /></dd>
+                            </div>
+                        )}
+                    </dl>
+                </div>
+            </section>
 
             <div className="grid gap-4 lg:grid-cols-2">
                 <section className="rounded-lg border border-gray-200 bg-white p-4">

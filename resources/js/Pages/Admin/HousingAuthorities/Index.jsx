@@ -32,10 +32,24 @@ export default function Index({ authorities, flash = {}, errors = {} }) {
         },
         { key: 'leases_count', header: 'Leases', align: 'right' },
         {
+            key: 'account_status',
+            header: 'Portal',
+            // [WP-43] Never colour alone (UI §9) — the state is in the words.
+            render: (a) =>
+                a.account_status === 'active' ? (
+                    <StatusBadge status="active" label="Can sign in" tone="settled" />
+                ) : a.account_status === 'invited' ? (
+                    <StatusBadge status="invited" label="Invited" tone="pending" />
+                ) : (
+                    <span className="text-sm text-gray-600">No account</span>
+                ),
+        },
+        {
             key: 'actions',
             header: 'Actions',
             align: 'right',
             render: (a) => (
+                <span className="flex flex-col items-end gap-1">
                 <span className="flex justify-end gap-3">
                     <Link
                         href={`/admin/housing-authorities/${a.id}/edit`}
@@ -43,6 +57,31 @@ export default function Index({ authorities, flash = {}, errors = {} }) {
                     >
                         Edit
                     </Link>
+                    {/* [WP-43] The route existed from the day the portal did;
+                        this is the button that reaches it. An agency with no
+                        contact email cannot be invited, and the action says so
+                        rather than disappearing. */}
+                    {a.account_status !== 'active' && (
+                        <button
+                            type="button"
+                            disabled={!a.contact_email}
+                            aria-label={
+                                a.contact_email
+                                    ? undefined
+                                    : `Invite ${a.name} — unavailable. Add a contact email address first.`
+                            }
+                            onClick={() => router.post(`/admin/housing-authorities/${a.id}/invite`, {}, {
+                                preserveScroll: true,
+                            })}
+                            className={
+                                a.contact_email
+                                    ? 'underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600'
+                                    : 'cursor-not-allowed text-gray-500'
+                            }
+                        >
+                            {a.account_status === 'invited' ? 'Resend link' : 'Invite'}
+                        </button>
+                    )}
                     {a.is_deletable && (
                         <button
                             type="button"
@@ -52,6 +91,12 @@ export default function Index({ authorities, flash = {}, errors = {} }) {
                             Remove
                         </button>
                     )}
+                </span>
+                {a.account_status !== 'active' && ! a.contact_email && (
+                    <span className="text-sm text-gray-600">
+                        Add a contact email address to invite them.
+                    </span>
+                )}
                 </span>
             ),
         },
