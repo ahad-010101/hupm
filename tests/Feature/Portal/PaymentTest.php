@@ -821,7 +821,7 @@ it('AC-CHG-11 clamps the percentage at 4, whatever the database says', function 
     // this is the second guard, for a value edited straight into the table.
     app(Settings::class)->set('payments.card_convenience_fee_percent', '25.00');
 
-    expect(app(PaymentIntentService::class)->feeBasisPoints())->toBe(400);
+    expect(app(PaymentIntentService::class)->feeBasisPoints('card'))->toBe(400);
 });
 
 /*
@@ -829,13 +829,17 @@ it('AC-CHG-11 clamps the percentage at 4, whatever the database says', function 
  | The bank transfer carries a fee too  [WP-47, Q-7b]
  |--------------------------------------------------------------------------
  |
- | Flat, not a percentage: ACH costs about 25c whatever the amount, so a
- | percentage of a $1,000 transfer would be a markup rather than a recovery.
+ | A percentage, like the card, because that is how the provider bills it:
+ | Authorize.Net charges eCheck.Net as a 0.75% discount rate with no flat
+ | per-transaction fee. WP-47 first shipped this flat, on the belief that a
+ | bank transfer costs a fixed ~25c. True of ACH generally; false of this
+ | gateway, and the gap is not academic — $2.50 is five times the cost of a
+ | $67 tenant portion and a third of the cost of a $1,023 one.
  |
  */
 
-it('AC-PAY-23 adds the flat bank-transfer fee to what the gateway takes', function () {
-    app(Settings::class)->set('payments.echeck_fee_flat', '2.50');
+it('AC-PAY-23 adds the bank-transfer percentage to what the gateway takes', function () {
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
 
     Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
 
@@ -843,38 +847,73 @@ it('AC-PAY-23 adds the flat bank-transfer fee to what the gateway takes', functi
 
     $payment = Payment::sole();
 
+    // 0.75% of $345.98 is 34598 x 75 / 10000 = 259.485, half-up to $2.59.
+    // Integers throughout (I-10).
+    //
     // [D-28] `amount` is what the gateway takes; the rent portion is what the
     // ledger will settle against.
-    expect($payment->amount->toDecimalString())->toBe('348.48')
-        ->and($payment->fee()->toDecimalString())->toBe('2.50')
+    expect($payment->amount->toDecimalString())->toBe('348.57')
+        ->and($payment->fee()->toDecimalString())->toBe('2.59')
         ->and($payment->rentPortion()->toDecimalString())->toBe('345.98')
         ->and($payment->method)->toBe('echeck')
         // I-6 still: submitting is not paying, fee or no fee.
         ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
 });
 
-it('AC-PAY-23 charges the same bank fee whatever the amount, and none on nothing', function () {
-    app(Settings::class)->set('payments.echeck_fee_flat', '2.50');
+it('AC-PAY-23 tracks the cost of a bank transfer at every size', function () {
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
 
     $intents = app(PaymentIntentService::class);
 
-    // Flat is the whole point: $2.50 on $100 and $2.50 on $1,000. This is the
-    // assertion that fails first if somebody "harmonises" the two rails onto
-    // one percentage.
-    expect($intents->convenienceFee('echeck', Money::fromString('100.00'))->toDecimalString())
-        ->toBe('2.50')
+    // The reason this is a rate and not a flat sum. A $67 tenant portion and a
+    // $1,000 payment cost the landlord 50c and $7.50 respectively; one flat
+    // figure cannot be right for both, and the tenant portions on these leases
+    // run from $67 to $1,023.
+    expect($intents->convenienceFee('echeck', Money::fromString('67.00'))->toDecimalString())
+        ->toBe('0.50')
         ->and($intents->convenienceFee('echeck', Money::fromString('1000.00'))->toDecimalString())
-        ->toBe('2.50')
+        ->toBe('7.50')
+        // Exact halves round up, not to even: 6600 x 75 / 10000 = 49.5 -> 50c.
+        ->and($intents->convenienceFee('echeck', Money::fromString('66.00'))->toDecimalString())
+        ->toBe('0.50')
         // Nothing to pay, nothing to charge for paying it.
         ->and($intents->convenienceFee('echeck', Money::zero())->toDecimalString())
         ->toBe('0.00');
 });
 
+it('AC-PAY-23 keeps the two rails on separate rates', function () {
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '2.90');
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
+
+    $intents = app(PaymentIntentService::class);
+
+    // One formula, two rates. The card rate must never reach the bank rail:
+    // 2.9% of $500 is $14.50 against the $3.75 a bank transfer actually costs.
+    expect($intents->convenienceFee('card', Money::fromString('500.00'))->toDecimalString())
+        ->toBe('14.50')
+        ->and($intents->convenienceFee('echeck', Money::fromString('500.00'))->toDecimalString())
+        ->toBe('3.75')
+        // A method the fee table does not know is charged nothing, rather than
+        // quietly inheriting a rate it never asked for.
+        ->and($intents->convenienceFee('cash', Money::fromString('500.00'))->toDecimalString())
+        ->toBe('0.00');
+});
+
+it('AC-PAY-23 clamps the bank percentage at 2, whatever the database says', function () {
+    // Ours, not a scheme rule: nothing caps an ACH fee the way the card brands
+    // cap a surcharge, but the provider charges 0.75%, so anything near this
+    // ceiling is a typing mistake. The form refuses more; this is the second
+    // guard, for a value edited straight into the table.
+    app(Settings::class)->set('payments.echeck_fee_percent', '25.00');
+
+    expect(app(PaymentIntentService::class)->feeBasisPoints('echeck'))->toBe(200);
+});
+
 it('AC-PAY-23 evaluates the lease policy on the rent, not on the rent plus the bank fee', function () {
-    app(Settings::class)->set('payments.echeck_fee_flat', '2.50');
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
 
     // full_only: the whole $500 balance and nothing else will do. If the policy
-    // saw the $502.50 the gateway takes, it would reject a payment that is
+    // saw the $503.75 the gateway takes, it would reject a payment that is
     // exactly right — the same trap AC-PAY-19 guards on the card rail, which
     // the bank rail walked into the moment it gained a fee.
     $this->lease->forceFill(['partial_payment_policy' => 'full_only'])->save();
@@ -883,16 +922,16 @@ it('AC-PAY-23 evaluates the lease policy on the rent, not on the rent plus the b
 
     $this->postJson('/portal/pay', payPayload(['amount' => '500.00']))->assertOk();
 
-    expect(Payment::sole()->amount->toDecimalString())->toBe('502.50');
+    expect(Payment::sole()->amount->toDecimalString())->toBe('503.75');
 });
 
 it('AC-PAY-23 tells the resident the bank fee before they choose a method', function () {
-    app(Settings::class)->set('payments.echeck_fee_flat', '2.50');
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
 
-    // Cards stay off. The method radios are hidden then, so the fee has nowhere
-    // else to be disclosed — and a fee a resident meets for the first time on
-    // their ledger is a fee they did not agree to.
+    // Cards stay off. The method radios are hidden then, so the summary panel
+    // is the only place the fee can be disclosed — and a fee a resident meets
+    // for the first time on their ledger is a fee they did not agree to.
     $this->get('/portal/pay')->assertInertia(fn ($page) => $page
-        ->where('echeckFeeCents', 250)
+        ->where('echeckFeeBasisPoints', 75)
         ->where('cardsEnabled', false));
 });

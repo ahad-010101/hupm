@@ -285,7 +285,7 @@ it('AC-PAY-23 charges an agency nothing now that the bank rail has a fee of its 
     // too, so the only thing between a HAP remittance and a charge on public
     // money is the payer guard in convenienceFee(). This is the test that
     // notices if it is ever removed.
-    app(Settings::class)->set('payments.echeck_fee_flat', '2.50');
+    app(Settings::class)->set('payments.echeck_fee_percent', '0.75');
 
     $this->actingAs($this->officer)->postJson('/agency/pay', [
         'lease_id' => $this->lease->id,

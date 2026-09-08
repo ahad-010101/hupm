@@ -252,7 +252,7 @@ it('AC-CHG-12 accepts a fractional percentage for the card fee', function () {
 
     expect(app(Settings::class)->string('payments.card_convenience_fee_percent'))->toBe('2.9')
         // And it reaches the fee calculation as 290 basis points, not 2.
-        ->and(app(PaymentIntentService::class)->feeBasisPoints())->toBe(290);
+        ->and(app(PaymentIntentService::class)->feeBasisPoints('card'))->toBe(290);
 });
 
 it('AC-CHG-12 still refuses more precision than the step allows, and more than the cap', function () {
@@ -277,52 +277,56 @@ it('AC-CHG-12 keeps whole-number settings integer-only', function () {
         ->assertSessionHasNoErrors();
 });
 
-it('AC-CHG-13 accepts a bank-transfer fee in dollars and cents', function () {
+it('AC-CHG-13 accepts a fractional bank-transfer percentage', function () {
+    // 0.75 is the whole point of the field: it is the rate the provider
+    // charges. A setting that could only hold whole percents would round the
+    // real cost up to 1% and turn a recovery into a markup.
     $this->actingAs($this->admin)
-        ->patch('/admin/settings', ['key' => 'payments.echeck_fee_flat', 'value' => '2.50'])
+        ->patch('/admin/settings', ['key' => 'payments.echeck_fee_percent', 'value' => '0.75'])
         ->assertSessionHasNoErrors();
 
-    expect(app(PaymentIntentService::class)->echeckFee()->toDecimalString())->toBe('2.50');
+    expect(app(PaymentIntentService::class)->feeBasisPoints('echeck'))->toBe(75);
 });
 
-it('AC-CHG-13 refuses a bank-transfer fee that is a typing mistake', function () {
-    // $30 for a transfer that costs 25c is not a fee anybody meant to set, and
-    // "500" with a stray keystroke is a resident's month. The ceiling is a
-    // guard on the typing, not a legal cap — there is no card-brand rule here.
-    foreach (['30.00', '2.505', '-1', ''] as $bad) {
+it('AC-CHG-13 refuses a bank-transfer percentage that is a typing mistake', function () {
+    // 25% of a resident's rent is not a fee anybody meant to set on a transfer
+    // that costs 0.75%. The ceiling is a guard on the typing, not a legal cap
+    // — no card-brand rule reaches the bank rail.
+    foreach (['25.00', '2.01', '0.755', '-1', ''] as $bad) {
         $this->actingAs($this->admin)
-            ->patch('/admin/settings', ['key' => 'payments.echeck_fee_flat', 'value' => $bad])
+            ->patch('/admin/settings', ['key' => 'payments.echeck_fee_percent', 'value' => $bad])
             ->assertSessionHasErrors('value');
     }
 
-    expect(app(Settings::class)->string('payments.echeck_fee_flat'))->toBe('0.00');
+    expect(app(Settings::class)->string('payments.echeck_fee_percent'))->toBe('0.00');
 });
 
 it('AC-CHG-13 ships the bank-transfer fee as a gated decision at zero', function () {
     // Nobody has decided whether residents should pay for a bank transfer, so
     // it ships off and blocks go-live until somebody says either way —
     // confirming the default counts as saying so.
-    $row = DB::table('settings')->where('key', 'payments.echeck_fee_flat')->first();
+    $row = DB::table('settings')->where('key', 'payments.echeck_fee_percent')->first();
 
     expect($row->value)->toBe('0.00')
         ->and((bool) $row->is_gated)->toBeTrue()
         ->and($row->confirmed_at)->toBeNull();
 });
 
-it('AC-CHG-13 renders the bank-transfer fee as a field that takes cents', function () {
+it('AC-CHG-13 renders the bank-transfer fee as a field that takes hundredths', function () {
     // The card fee shipped broken in exactly this way: the server accepted 2.9
     // and the browser refused it first, because the field had no `step` and so
     // defaulted to whole numbers. A server that accepts what the form will not
-    // send is not a working setting.
+    // send is not a working setting — and 0.75 needs two decimal places to
+    // exist at all.
     $this->actingAs($this->admin)
         ->get('/admin/settings')
         ->assertInertia(function ($page) {
             $fee = collect($page->toArray()['props']['settings'])
-                ->firstWhere('key', 'payments.echeck_fee_flat');
+                ->firstWhere('key', 'payments.echeck_fee_percent');
 
             expect($fee['input'])->toBe('number')
                 ->and($fee['step'])->toBe('0.01')
                 ->and($fee['min'])->toBe(0)
-                ->and($fee['max'])->toBe(25);
+                ->and($fee['max'])->toBe(2);
         });
 });

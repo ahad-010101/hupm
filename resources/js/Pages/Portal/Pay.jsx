@@ -55,7 +55,7 @@ export default function Pay({
     leaseId,
     cardsEnabled = false,
     cardFeeBasisPoints = 0,
-    echeckFeeCents = 0,
+    echeckFeeBasisPoints = 0,
     depositDue = '0.00',
 }) {
     const owed = toCents(balance) ?? 0;
@@ -77,10 +77,9 @@ export default function Pay({
     const [amount, setAmount] = useState(arrearsCents > 0 ? fromCents(arrearsCents) : '');
     const [method, setMethod] = useState('echeck');
 
-    // Each rail carries its own fee and they are different shapes: the card is
-    // a percentage of what they are paying, so it moves as they type; the bank
-    // transfer is a flat sum, because that is what it costs whatever the
-    // amount.
+    // Both rails charge a percentage of what they are paying, so the figure
+    // moves as they type. Two rates, one formula: the payment provider bills a
+    // card at about 2.9% and a bank transfer at 0.75%, both as rates.
     //
     // Integer half-up on basis points, matching
     // PaymentIntentService::convenienceFee() exactly — the figure on this
@@ -88,18 +87,20 @@ export default function Pay({
     // the server's integer arithmetic by a cent often enough to matter.
     //
     // Nothing is charged on an empty or zero amount, mirroring the server's
-    // `isPositive()` guard — otherwise a flat fee would sit on the screen
-    // before they have typed anything to pay.
+    // `isPositive()` guard.
     const amountCents = toCents(amount) ?? 0;
+    const feeBasisPoints = method === 'card' ? cardFeeBasisPoints : echeckFeeBasisPoints;
     const feeCents =
-        amountCents <= 0
-            ? 0
-            : method === 'card'
-              ? Math.floor((amountCents * cardFeeBasisPoints * 2 + 10000) / 20000)
-              : echeckFeeCents;
+        amountCents > 0 ? Math.floor((amountCents * feeBasisPoints * 2 + 10000) / 20000) : 0;
     const totalCents = amountCents + feeCents;
-    const feePercentLabel = (cardFeeBasisPoints / 100).toFixed(2).replace(/\.?0+$/, '');
-    const feeLabel = method === 'card' ? `Card fee (${feePercentLabel}%)` : 'Bank transfer fee';
+
+    // "2.90" reads as 2.9 and "0.75" stays 0.75 — trailing zeros only, never a
+    // significant digit.
+    const percentLabel = (points) => (points / 100).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+    const feeLabel =
+        method === 'card'
+            ? `Card fee (${percentLabel(cardFeeBasisPoints)}%)`
+            : `Bank transfer fee (${percentLabel(echeckFeeBasisPoints)}%)`;
 
     // A saved bank account cannot pay a card transaction and the reverse is
     // equally true, so the list follows the choice rather than offering
@@ -363,8 +364,8 @@ export default function Pay({
                                                 value: 'echeck',
                                                 label: 'Bank account',
                                                 note:
-                                                    echeckFeeCents > 0
-                                                        ? `A ${formatMoney(fromCents(echeckFeeCents)).text} fee is added.`
+                                                    echeckFeeBasisPoints > 0
+                                                        ? `A ${percentLabel(echeckFeeBasisPoints)}% fee is added.`
                                                         : 'No fee.',
                                             },
                                             {
@@ -372,7 +373,7 @@ export default function Pay({
                                                 label: 'Debit or credit card',
                                                 note:
                                                     cardFeeBasisPoints > 0
-                                                        ? `A ${feePercentLabel}% fee is added.`
+                                                        ? `A ${percentLabel(cardFeeBasisPoints)}% fee is added.`
                                                         : 'No fee.',
                                             },
                                         ].map((option) => (

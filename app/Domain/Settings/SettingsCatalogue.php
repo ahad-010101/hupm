@@ -229,27 +229,28 @@ class SettingsCatalogue
                     .'before the payment is taken, so every card is charged the same. Take advice '
                     .'before setting this above zero.',
             ],
-            'payments.echeck_fee_flat' => [
+            'payments.echeck_fee_percent' => [
                 'group' => 'Payment methods',
-                'label' => 'Bank transfer fee (flat)',
-                'help' => 'A fixed amount added when a resident pays from a bank account, whatever '
-                    .'the payment. Flat rather than a percentage because a bank transfer costs '
-                    .'about 25¢ regardless of size — a percentage of a $1,000 rent payment would be '
-                    .'a markup, not a recovery. They see it before they confirm and it posts to '
-                    .'their ledger as its own line. Leave at 0 to absorb the cost.',
+                'label' => 'Bank transfer fee (% of the payment)',
+                'help' => 'A percentage of the amount, added when a resident pays from a bank '
+                    .'account. A percentage rather than a fixed sum because that is how the '
+                    .'payment provider bills it: eCheck.Net is charged as a rate of 0.75% per '
+                    .'transaction, with no flat per-transaction fee. Setting this to 0.75 '
+                    .'recovers what a transfer costs and no more — $7.50 on a $1,000 payment, '
+                    .'50¢ on a $67 one. Leave at 0 to absorb it instead.',
                 'input' => 'number',
                 'min' => 0,
-                // A ceiling on the typing, not a policy. Nothing in law caps
-                // this the way the card brands cap a surcharge; $25 is simply
-                // further than any honest ACH fee goes, and it stops a stray
-                // keystroke charging a resident $500.
-                'max' => 25,
+                // Ours, not a scheme rule. Nothing caps an ACH fee the way the
+                // card brands cap a surcharge, but the cost is 0.75%: nearly
+                // triple that is a stray keystroke rather than a policy.
+                'max' => 2,
                 'step' => '0.01',
-                'warning' => 'This is charged per payment, not per month. A resident paying weekly, '
-                    .'or paying rent and a deposit separately, pays it each time — which is the '
-                    .'right answer if it is covering a cost, and the wrong one if it reads as a '
-                    .'penalty for paying in instalments. It is never added to a housing authority '
-                    .'remittance.',
+                'warning' => 'Charged per payment, not per month. A resident paying weekly, or '
+                    .'paying rent and a deposit separately, pays it each time — right if it is '
+                    .'covering a cost, wrong if it reads as a penalty for paying in instalments. '
+                    .'The provider also bills a $10 monthly minimum for the service whether or not '
+                    .'anybody uses it, and that is not recoverable here. Never added to a housing '
+                    .'authority remittance.',
             ],
 
             /*
