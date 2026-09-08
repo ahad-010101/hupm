@@ -30,6 +30,25 @@ class Vendor extends Model
         return ['active' => 'boolean'];
     }
 
+    /**
+     * The portal accounts belonging to this contractor.  [WP-44]
+     *
+     * NG-6 said a contractor was a record and not an account, and until 5 Sep
+     * 2026 that was true. It was reversed deliberately; the record is still the
+     * thing that matters, and a contractor without a login is still a complete
+     * contractor.
+     */
+    public function users(): HasMany
+    {
+        return $this->hasMany(User::class);
+    }
+
+    /** True once an account exists and a password has been set. */
+    public function hasPortalAccess(): bool
+    {
+        return $this->users()->where('status', User::STATUS_ACTIVE)->exists();
+    }
+
     public function requests(): HasMany
     {
         return $this->hasMany(MaintenanceRequest::class);

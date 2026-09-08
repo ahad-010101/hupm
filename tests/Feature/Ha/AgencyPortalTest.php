@@ -206,7 +206,7 @@ it('AC-HA-04 charges an agency no convenience fee and offers no card', function 
 
     // Even with cards switched on and a fee set for residents.
     app(Settings::class)->set('payments.cards_enabled', 'true');
-    app(Settings::class)->set('payments.card_convenience_fee', '4.95');
+    app(Settings::class)->set('payments.card_convenience_fee_percent', '2.90');
 
     $this->actingAs($this->officer)->postJson('/agency/pay', [
         'lease_id' => $this->lease->id,

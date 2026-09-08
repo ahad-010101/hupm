@@ -22,12 +22,16 @@ class HousingAuthorityController extends Controller
         return Inertia::render('Admin/HousingAuthorities/Index', [
             'authorities' => HousingAuthority::query()
                 ->withCount('leases')
+                ->with('users:id,housing_authority_id,status')
                 ->orderBy('name')
                 ->get()
                 ->map(fn ($a) => [
                     ...$a->only(['id', 'name', 'contact_name', 'contact_email', 'contact_phone', 'remittance_type']),
                     'leases_count' => $a->leases_count,
                     'is_deletable' => $a->leases_count === 0,
+                    // [WP-43] Whether they can reach the portal, and how far
+                    // along. Null means no account has been created at all.
+                    'account_status' => $a->users->first()?->status,
                 ]),
         ]);
     }

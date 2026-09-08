@@ -1,8 +1,11 @@
 <?php
 
+use App\Domain\Ledger\LedgerService;
+use App\Models\Lease;
 use App\Models\Tenant;
 use App\Models\Unit;
 use App\Models\User;
+use App\Support\Money;
 use Database\Seeders\DemoDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -263,4 +266,53 @@ it('WP-38 keeps the status filter when sorting', function () {
         ->assertInertia(fn ($page) => $page
             ->has('tenants.data', 1)
             ->where('sort.key', 'email'));
+});
+
+it('AC-CHG-11 shows the tenant balance on their own page, matching the ledger screen', function () {
+    $lease = new Lease;
+    $lease->forceFill([
+        'unit_id' => Unit::factory()->create()->id,
+        'tenant_id' => ($tenant = Tenant::factory()->create())->id,
+        'start_date' => '2026-01-01', 'end_date' => '2026-12-31',
+        'total_contract_rent' => '1200.00', 'tenant_portion' => '500.00', 'ha_portion' => '700.00',
+        'rent_due_day' => 1, 'grace_period_days' => 5, 'status' => 'active',
+    ])->save();
+
+    $ledger = app(LedgerService::class);
+    $ledger->postCharge($lease, 'rent', 'tenant', Money::fromString('500.00'),
+        'Rent — February 2026', 'tsb:t', null, '2026-02');
+    $ledger->postCharge($lease, 'rent', 'housing_authority', Money::fromString('700.00'),
+        'Rent — February 2026', 'tsb:ha', null, '2026-02');
+
+    // The same four figures the ledger screen shows, from the same
+    // calculators — the two pages cannot disagree.
+    $this->actingAs($this->admin)
+        ->get("/admin/tenants/{$tenant->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('balances.tenant', '500.00')
+            // Admin console only. I-4 keeps this off resident-facing screens,
+            // not off this one (§5.3).
+            ->where('balances.ha', '700.00')
+            ->where('balances.pending', '0.00'));
+});
+
+it('AC-CHG-11 sends a credit as a negative, for the page to render as "Credit"', function () {
+    $lease = new Lease;
+    $lease->forceFill([
+        'unit_id' => Unit::factory()->create()->id,
+        'tenant_id' => ($tenant = Tenant::factory()->create())->id,
+        'start_date' => '2026-01-01', 'end_date' => '2026-12-31',
+        'total_contract_rent' => '900.00', 'tenant_portion' => '900.00', 'ha_portion' => '0.00',
+        'rent_due_day' => 1, 'grace_period_days' => 5, 'status' => 'active',
+    ])->save();
+
+    app(LedgerService::class)->postAdjustment(
+        $lease, 'tenant', Money::fromString('-40.00'),
+        'Overcharged in August', 'Rent correction',
+    );
+
+    $this->actingAs($this->admin)
+        ->get("/admin/tenants/{$tenant->id}")
+        ->assertInertia(fn ($page) => $page->where('balances.tenant', '-40.00'));
 });

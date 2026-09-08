@@ -31,6 +31,18 @@ export default function Index({ tickets, filters = {}, emergencyCount = 0, statu
 
             {flash.status && <Alert tone="success" className="mb-4">{flash.status}</Alert>}
 
+            {/* [WP-46] Until now only a resident could start a repair, so
+                anything reported by telephone or found on an inspection had
+                nowhere to go. */}
+            <div className="mb-4 flex justify-end">
+                <Link
+                    href="/admin/maintenance/new"
+                    className="inline-flex min-h-touch items-center rounded-md bg-brand-600 px-4 text-base font-semibold text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                >
+                    Raise a ticket
+                </Link>
+            </div>
+
             {emergencyCount > 0 && (
                 <Alert tone="error" className="mb-4" title="Urgent requests waiting">
                     {emergencyCount} urgent {emergencyCount === 1 ? 'request is' : 'requests are'} open.

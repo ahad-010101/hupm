@@ -40,6 +40,10 @@ class MaintenanceController extends Controller
         $tickets = $tenant
             ? Ticket::query()
                 ->where('tenant_id', $tenant->id)
+                // [WP-46] Structural, like the tenant scope beside it. An
+                // internal ticket is the office's own note about this unit and
+                // was never the resident's to read.
+                ->where('internal', false)
                 ->orderByDesc('created_at')
                 ->get()
                 ->map(fn (Ticket $ticket) => $this->summary($ticket))
@@ -107,7 +111,14 @@ class MaintenanceController extends Controller
     {
         $tenant = $this->tenantFor($request);
 
-        abort_unless($tenant && $maintenance->tenant_id === $tenant->id, 404);
+        // 404, never 403 — a 403 confirms the ticket exists, which for an
+        // internal one is the whole thing being kept back (I-9). Applied to
+        // confirm as well as show: a resident must not be able to close a
+        // ticket they were never shown.
+        abort_unless(
+            $tenant && $maintenance->tenant_id === $tenant->id && ! $maintenance->internal,
+            404,
+        );
 
         $maintenance->load(['vendor', 'unit.property']);
 
@@ -148,7 +159,14 @@ class MaintenanceController extends Controller
     {
         $tenant = $this->tenantFor($request);
 
-        abort_unless($tenant && $maintenance->tenant_id === $tenant->id, 404);
+        // 404, never 403 — a 403 confirms the ticket exists, which for an
+        // internal one is the whole thing being kept back (I-9). Applied to
+        // confirm as well as show: a resident must not be able to close a
+        // ticket they were never shown.
+        abort_unless(
+            $tenant && $maintenance->tenant_id === $tenant->id && ! $maintenance->internal,
+            404,
+        );
 
         try {
             $this->maintenance->confirmComplete($maintenance, $request->user());

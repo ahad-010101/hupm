@@ -203,17 +203,26 @@ class SettingsCatalogue
                     .'if residents should cover that.',
                 'input' => 'bool',
             ],
-            'payments.card_convenience_fee' => [
+            'payments.card_convenience_fee_percent' => [
                 'group' => 'Payment methods',
-                'label' => 'Card convenience fee',
-                'help' => 'A flat amount added when a resident chooses to pay by card, shown to them '
-                    .'before they confirm and posted to their ledger as its own line. Leave at 0.00 '
-                    .'to absorb the processing cost instead. Applies only to card payments — a bank '
-                    .'transfer is never charged a fee.',
+                'label' => 'Card fee (% of the payment)',
+                'help' => 'A percentage of the amount, added when a resident chooses to pay by card. '
+                    .'They see the figure before they confirm and it posts to their ledger as its own '
+                    .'line. For example 2.9 on a $345.98 payment adds $10.03. Leave at 0 to absorb '
+                    .'the processing cost instead. Applies only to card payments — a bank transfer is '
+                    .'never charged a fee.',
                 'input' => 'number',
-                'warning' => 'A percentage of the payment is not offered here on purpose: card-brand '
-                    .'rules treat that as a surcharge, which must be registered with Visa and '
-                    .'Mastercard in advance and may not be applied to debit cards at all.',
+                'min' => 0,
+                'max' => 4,
+                // Stated once, plainly, where the decision is made. This is a
+                // surcharge in card-brand terms, not a convenience fee, and
+                // the difference is not cosmetic.
+                'warning' => 'A percentage is a SURCHARGE under Visa and Mastercard rules, not a '
+                    .'convenience fee. That means registering with the card brands in advance, a 4% '
+                    .'ceiling (enforced here), and disclosure at entry and on the receipt. Debit '
+                    .'cards may not be surcharged at all — this system cannot tell debit from credit '
+                    .'before the payment is taken, so every card is charged the same. Take advice '
+                    .'before setting this above zero.',
             ],
 
             /*

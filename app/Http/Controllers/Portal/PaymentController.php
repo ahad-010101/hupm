@@ -71,7 +71,10 @@ class PaymentController extends Controller
             // charge it, so what the tenant is shown and what they are charged
             // cannot drift.
             'cardsEnabled' => $this->settings->bool('payments.cards_enabled', false),
-            'cardConvenienceFee' => (string) $this->intents->convenienceFee(Payment::METHOD_CARD),
+            // [WP-39, changed 2026-09-05] The percentage, not an amount — the
+            // fee now depends on what they choose to pay, so the page works it
+            // out as they type. Basis points keep the page off floats too.
+            'cardFeeBasisPoints' => $this->intents->feeBasisPoints(),
             'gatewayReady' => $this->gateway->isConfigured(),
             // One per render, so a double submit is one payment (AC-PAY-02).
             'idempotencyKey' => (string) Str::uuid(),

@@ -54,7 +54,7 @@ export default function Pay({
     idempotencyKey,
     leaseId,
     cardsEnabled = false,
-    cardConvenienceFee = '0.00',
+    cardFeeBasisPoints = 0,
     depositDue = '0.00',
 }) {
     const owed = toCents(balance) ?? 0;
@@ -77,9 +77,18 @@ export default function Pay({
     const [method, setMethod] = useState('echeck');
 
     // The fee is only ever added to a card payment, and only when one is set.
-    const feeOnCardCents = toCents(cardConvenienceFee) ?? 0;
-    const feeCents = method === 'card' ? feeOnCardCents : 0;
-    const totalCents = (toCents(amount) ?? 0) + feeCents;
+    // A percentage of what they are paying, so it moves as they type. Integer
+    // half-up on basis points, matching PaymentIntentService::convenienceFee()
+    // exactly — the figure on this screen has to be the figure charged, and a
+    // float here would disagree with the server's integer arithmetic by a cent
+    // often enough to matter.
+    const amountCents = toCents(amount) ?? 0;
+    const feeCents =
+        method === 'card' && cardFeeBasisPoints > 0
+            ? Math.floor((amountCents * cardFeeBasisPoints * 2 + 10000) / 20000)
+            : 0;
+    const totalCents = amountCents + feeCents;
+    const feePercentLabel = (cardFeeBasisPoints / 100).toFixed(2).replace(/\.?0+$/, '');
 
     // A saved bank account cannot pay a card transaction and the reverse is
     // equally true, so the list follows the choice rather than offering
@@ -348,8 +357,8 @@ export default function Pay({
                                                 value: 'card',
                                                 label: 'Debit or credit card',
                                                 note:
-                                                    feeOnCardCents > 0
-                                                        ? `A $${cardConvenienceFee} fee is added.`
+                                                    cardFeeBasisPoints > 0
+                                                        ? `A ${feePercentLabel}% fee is added.`
                                                         : 'No fee.',
                                             },
                                         ].map((option) => (
@@ -388,9 +397,9 @@ export default function Pay({
                                         </dd>
                                     </div>
                                     <div className="flex justify-between gap-4">
-                                        <dt className="text-gray-700">Card fee</dt>
+                                        <dt className="text-gray-700">Card fee ({feePercentLabel}%)</dt>
                                         <dd>
-                                            <Money value={cardConvenienceFee} />
+                                            <Money value={fromCents(feeCents)} />
                                         </dd>
                                     </div>
                                     <div className="mt-1 flex justify-between gap-4 border-t border-gray-200 pt-1 font-semibold">

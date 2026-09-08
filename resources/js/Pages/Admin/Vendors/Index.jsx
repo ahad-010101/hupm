@@ -15,9 +15,11 @@ import ConfirmDialog from '@/Components/ConfirmDialog';
  * a contractor is six fields, and a separate page for six fields is a page
  * nobody wants to visit twice.
  *
- * A vendor is a record, not an account. There is no vendor portal in v1 (NG-6),
- * so the email address is somewhere to send a job and nothing here is a
- * credential — which is why the form asks for no password and offers no invite.
+ * **NG-6 was reversed on 5 Sep 2026 (WP-44).** A contractor may now have a
+ * login as well as a record — but the record is still the thing that matters,
+ * and a contractor without an account is still a complete contractor. The form
+ * asks for no password: an invite emails a set-password link, exactly as it
+ * does for a resident, and nothing typed on this screen is ever a credential.
  */
 
 const BLANK = { name: '', trade: '', phone: '', email: '', notes: '', active: true };
@@ -201,6 +203,30 @@ export default function Index({ vendors = [], filters = {}, inactiveCount = 0, f
                     >
                         {editing?.id === vendor.id ? 'Close' : 'Edit'}
                     </button>
+                    {/* [WP-44] Offered, never required. A contractor you only
+                        ever telephone needs no account, and the button is
+                        simply absent once they have one. */}
+                    {vendor.account_status !== 'active' && (
+                        <button
+                            type="button"
+                            disabled={!vendor.email}
+                            aria-label={
+                                vendor.email
+                                    ? undefined
+                                    : `Invite ${vendor.name} — unavailable. Add an email address first.`
+                            }
+                            onClick={() => router.post(`/admin/vendors/${vendor.id}/invite`, {}, {
+                                preserveScroll: true,
+                            })}
+                            className={
+                                vendor.email
+                                    ? 'inline-flex min-h-touch items-center rounded-md border border-gray-300 px-3 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600'
+                                    : 'inline-flex min-h-touch cursor-not-allowed items-center rounded-md border border-gray-300 px-3 text-base font-medium text-gray-500'
+                            }
+                        >
+                            {vendor.account_status === 'invited' ? 'Resend link' : 'Give a login'}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => setRemoving(vendor)}
@@ -219,7 +245,8 @@ export default function Index({ vendors = [], filters = {}, inactiveCount = 0, f
 
             <p className="mb-4 max-w-3xl text-base text-gray-700">
                 The people you call out. Anyone marked as offered here appears in the assign list on a
-                maintenance request. Nobody here has a login — this is a phone book, not an account.
+                maintenance request. Give a contractor a login and they can see the jobs assigned to
+                them and tell you where each one has got to — they see nothing else, and no money.
             </p>
 
             {flash.status && (

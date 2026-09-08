@@ -45,20 +45,56 @@ class PaymentIntentService
     ) {}
 
     /**
-     * The flat fee for choosing this method.  [WP-39, Q-7a]
+     * The fee for choosing this method, as a percentage of the payment.
+     * [WP-39, Q-7a — changed from a flat amount 2026-09-05]
      *
      * Zero for a bank transfer, always. Public because the portal has to show
      * the tenant the figure *before* they choose, and it must be the same
      * figure the intent charges — two readings of one setting is how a
      * disclosed fee and a charged fee drift apart.
+     *
+     * **Basis points, and `prorate`, so no float ever touches it** (I-10).
+     * 2.9% is 290 basis points and the arithmetic is integer half-up: on
+     * $345.98 that is 34598 × 290 ÷ 10000 = $10.03, exactly, every time.
+     * Reading the percentage as a float and multiplying would give
+     * 10.033420000000001 and a fee that disagrees with itself between the
+     * screen and the charge.
      */
-    public function convenienceFee(string $method): Money
+    public function convenienceFee(string $method, Money $amount): Money
     {
         if ($method !== Payment::METHOD_CARD) {
             return Money::zero();
         }
 
-        return $this->settings->money('payments.card_convenience_fee', Money::zero());
+        $basisPoints = $this->feeBasisPoints();
+
+        if ($basisPoints === 0 || ! $amount->isPositive()) {
+            return Money::zero();
+        }
+
+        return $amount->prorate($basisPoints, 10_000);
+    }
+
+    /**
+     * The configured percentage, in basis points.
+     *
+     * Capped at 400 (4%) here as well as in the settings form. Card-brand
+     * rules cap a surcharge at 4%, and a setting edited straight into the
+     * database should not be able to exceed what the form refuses.
+     */
+    public function feeBasisPoints(): int
+    {
+        $percent = $this->settings->string('payments.card_convenience_fee_percent', '0');
+
+        // Through Money rather than a float: the setting is a decimal string
+        // like "2.90", and Money is the one place decimal strings are parsed.
+        // "2.90" parses to 290 minor units, which IS the basis-point figure —
+        // two decimal places of a percent is exactly one hundredth of a
+        // percent. The coincidence is convenient and worth naming so nobody
+        // "fixes" it later.
+        $points = Money::fromString($percent === '' ? '0' : $percent)->minor;
+
+        return max(0, min(400, $points));
     }
 
     /**
@@ -129,7 +165,10 @@ class PaymentIntentService
         [$payment, $entry] = $this->recordIntent(
             $lease,
             $amount,
-            $this->convenienceFee($method),
+            // The fee is a percentage of the RENT being paid, not of the total
+            // — charging a percentage of a figure that already includes the fee
+            // would compound it.
+            $this->convenienceFee($method, $amount),
             $idempotencyKey,
             $method,
             $appliesTo,

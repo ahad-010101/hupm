@@ -98,6 +98,12 @@ class MaintenanceService
                 // reported, not once somebody triages it.
                 'urgency' => ($attributes['is_emergency'] ?? false) ? 'emergency' : 'normal',
                 'status' => Ticket::STATUS_SUBMITTED,
+                // [WP-46] Written HERE, not by the caller afterwards.
+                // `notifyTenant()` below reads it, and it runs outside this
+                // transaction — a flag set after submit() returns would arrive
+                // one email too late, announcing the very ticket it is meant
+                // to keep back.
+                'internal' => (bool) ($attributes['internal'] ?? false),
             ])->save();
 
             foreach ($files as $file) {
@@ -108,7 +114,12 @@ class MaintenanceService
                 $ticket,
                 from: null,
                 to: Ticket::STATUS_SUBMITTED,
-                note: 'Request submitted by the resident.',
+                // Says who actually raised it. "Submitted by the resident" on a
+                // ticket the office raised is a small untruth on a permanent
+                // timeline somebody may later rely on.
+                note: $actor?->isAdmin()
+                    ? 'Raised by the office.'
+                    : 'Request submitted by the resident.',
                 actor: $actor,
             );
 
@@ -396,6 +407,18 @@ class MaintenanceService
         $tenant = $ticket->tenant;
 
         if (! $tenant || $message === null) {
+            return;
+        }
+
+        // [WP-46] An internal ticket tells the resident nothing, ever.
+        //
+        // Guarded here rather than at each call site because the dangerous one
+        // is not obvious: `assignVendor()` emails "X has been assigned to your
+        // request", and an admin raising an internal ticket with a contractor
+        // chosen on the same form would announce by email the very work the
+        // portal filter is hiding. One guard in the one place every message
+        // passes through cannot be forgotten by the next caller.
+        if ($ticket->internal) {
             return;
         }
 
