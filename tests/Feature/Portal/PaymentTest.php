@@ -935,3 +935,51 @@ it('AC-PAY-23 tells the resident the bank fee before they choose a method', func
         ->where('echeckFeeBasisPoints', 75)
         ->where('cardsEnabled', false));
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | A deposit is not rent, and the policy must not confuse the two  [WP-49]
+ |--------------------------------------------------------------------------
+ */
+
+it('AC-PAY-24 lets a full_only resident pay their rent while a deposit is outstanding', function () {
+    // $500 of rent plus a $900 deposit. The deposit is a separate obligation
+    // (WP-40) and a rent payment cannot settle it, so the only correct amount
+    // here is $500 — which the Pay page fills in by default.
+    $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', 'pay:deposit', CarbonImmutable::parse('2026-02-01'),
+    );
+
+    $this->lease->forceFill(['partial_payment_policy' => 'full_only'])->save();
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    // Measured against the whole $1,400 balance this reads as a part payment,
+    // and a full_only lease refuses it — leaving the resident no acceptable
+    // amount at all, because $1,400 would be accepted and then allocated
+    // against $500 of rent with $900 credited forward rather than paid to the
+    // deposit. The page's own default was refused by the page's own rule.
+    $this->postJson('/portal/pay', payPayload(['amount' => '500.00']))->assertOk();
+
+    expect(Payment::sole()->amount->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-24 still holds a full_only resident to the whole of their rent', function () {
+    $this->ledger->postCharge(
+        $this->lease, 'deposit', 'tenant', Money::fromString('900.00'),
+        'Security deposit', 'pay:deposit', CarbonImmutable::parse('2026-02-01'),
+    );
+
+    $this->lease->forceFill(['partial_payment_policy' => 'full_only'])->save();
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    // The rule is not weakened, only pointed at the right figure: $400 of a
+    // $500 rent balance is still a part payment and still refused.
+    $this->postJson('/portal/pay', payPayload(['amount' => '400.00']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('amount');
+
+    expect(Payment::count())->toBe(0);
+});

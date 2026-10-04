@@ -37,7 +37,18 @@ class PartialPaymentPolicy
             return $this->no('Enter an amount greater than zero.');
         }
 
-        $balance = $this->balances->tenantBalance($lease->tenant_id);
+        // [WP-49] ARREARS, not the whole tenant balance.
+        //
+        // A deposit is a separate obligation (WP-40) and a rent payment cannot
+        // settle it — `PaymentIntentService::create()` skips this check
+        // entirely for a deposit payment, so the only thing ever measured here
+        // is rent. Measuring it against a deposit-inclusive figure made
+        // "pay your rent in full" look like a part payment: on a `full_only`
+        // lease the resident then had no acceptable amount at all, because the
+        // one the policy would accept is the one the allocator refuses to put
+        // against the deposit. The page's own default was being rejected by
+        // the page's own rule.
+        $balance = $this->balances->arrearsBalance($lease->tenant_id);
 
         // Paying the whole balance is always permitted — no policy exists to
         // stop someone clearing their account.
