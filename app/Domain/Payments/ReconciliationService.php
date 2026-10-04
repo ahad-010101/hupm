@@ -63,19 +63,27 @@ class ReconciliationService
     private const SETTLED_STATUSES = ['settledSuccessfully'];
 
     /**
-     * ⚠ **[WP-39 — INCOMPLETE FOR CARDS]** These six are the ACH vocabulary,
-     * observed against the live sandbox on 19 Aug 2026. The card dispute
-     * statuses are **not** in this list and must be added once observed the
-     * same way — they are deliberately absent rather than guessed.
+     * The ACH failure vocabulary, observed against the live sandbox on
+     * 19 Aug 2026.
      *
-     * Until then a chargeback reaches `apply()` and is not recognised as a
-     * failure, so the payment stays settled and the balance stays reduced for
-     * money the card network took back. That failure is *silent*, which UI §3.9
-     * names as the worst kind this system can have — hence this notice rather
-     * than a plausible-looking string.
+     * ⚠ **[WP-48] No card dispute status belongs here, and none is coming.**
+     * WP-39 left a note saying the card statuses should be added "once
+     * observed the same way". That was wrong, and the correction is recorded
+     * here so nobody spends a day looking: **Authorize.Net does not report
+     * credit card chargebacks at all.** It is the gateway, not the processor —
+     * a chargeback is a bank-to-bank event between the issuer and the
+     * acquirer, Authorize.Net is not a party to it, there are no chargeback
+     * webhooks and no chargeback API call, and the legacy `chargeback` status
+     * is deprecated along with the service it belonged to. Confirmed against
+     * their developer community, 4 Oct 2026.
      *
-     * Everything else about the card path is finished and tested; this one line
-     * is the sandbox step.
+     * So the settlement poll cannot catch a card chargeback *in principle*.
+     * The real path is a human: the acquirer tells the client, and an admin
+     * records it. That action is WP-48, and until it ships a chargeback leaves
+     * the payment settled and the balance reduced for money already taken
+     * back — which is why `payments.cards_enabled` must stay off in
+     * production. ACH is unaffected: a returned eCheck does arrive here, as
+     * `returnedItem`.
      */
     private const FAILED_STATUSES = [
         'returnedItem', 'declined', 'voided', 'expired', 'failedReview', 'settlementError',
