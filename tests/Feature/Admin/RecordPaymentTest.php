@@ -274,3 +274,83 @@ it('surfaces Management Review on the form rather than hiding the lease', functi
             ->has('leases', 1)
             ->where('leases.0.in_management_review', true));
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | Recording a chargeback through the screen  [WP-48, API-ADM-17]
+ |--------------------------------------------------------------------------
+ */
+
+it('AC-PAY-27 lets an admin record a chargeback and puts the money back', function () {
+    $this->ledger->postCharge(
+        $this->lease, 'rent', 'tenant', Money::fromString('500.00'),
+        'Rent — February 2026', 'cb:rent', CarbonImmutable::parse('2026-02-01'), '2026-02',
+    );
+
+    $payment = Payment::factory()->create([
+        'lease_id' => $this->lease->id,
+        'tenant_id' => $this->tenant->id,
+        'amount' => '500.00',
+        'method' => 'card',
+        'gateway' => 'authorize_net',
+        'status' => Payment::STATUS_SETTLED,
+        'idempotency_key' => (string) Str::uuid(),
+        'submitted_at' => now()->subDays(3),
+        'settled_at' => now()->subDays(2),
+    ]);
+
+    $this->ledger->postPayment(
+        $this->lease, 'tenant', Money::fromString('500.00'),
+        'Payment submitted online', $payment->id, 'cleared',
+    );
+
+    expect($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
+
+    $this->post("/admin/payments/{$payment->id}/chargeback", [
+        'reason' => 'Cardholder disputed the charge as unrecognised',
+        'code' => '4853',
+    ])->assertRedirect();
+
+    expect($payment->fresh()->status)->toBe('returned')
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-27 will not record one without a reason', function () {
+    $payment = Payment::factory()->create([
+        'lease_id' => $this->lease->id,
+        'tenant_id' => $this->tenant->id,
+        'amount' => '500.00',
+        'method' => 'card',
+        'status' => Payment::STATUS_SETTLED,
+        'idempotency_key' => (string) Str::uuid(),
+        'submitted_at' => now()->subDays(3),
+    ]);
+
+    // The resident is told this, and it is the only record of why the balance
+    // moved. "Returned" with no explanation is not something anybody can audit
+    // a year later when they dispute it.
+    $this->post("/admin/payments/{$payment->id}/chargeback", ['reason' => ''])
+        ->assertSessionHasErrors('reason');
+
+    expect($payment->fresh()->status)->toBe('settled');
+});
+
+it('AC-PAY-27 keeps everybody but an admin out of it', function (string $role) {
+    $payment = Payment::factory()->create([
+        'lease_id' => $this->lease->id,
+        'tenant_id' => $this->tenant->id,
+        'amount' => '500.00',
+        'method' => 'card',
+        'status' => Payment::STATUS_SETTLED,
+        'idempotency_key' => (string) Str::uuid(),
+        'submitted_at' => now()->subDays(3),
+    ]);
+
+    $user = User::factory()->create(['role' => $role, 'tenant_id' => $this->tenant->id]);
+
+    $this->actingAs($user)
+        ->post("/admin/payments/{$payment->id}/chargeback", ['reason' => 'Disputed'])
+        ->assertForbidden();
+
+    expect($payment->fresh()->status)->toBe('settled');
+})->with(['tenant', 'vendor']);

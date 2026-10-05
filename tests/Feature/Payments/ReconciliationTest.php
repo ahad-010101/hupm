@@ -783,3 +783,127 @@ it('AC-PAY-23 names the settled fee for the rail that incurred it', function () 
         // +500 rent, −503.75 payment, +3.75 fee.
         ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | A chargeback nobody will ever be told about  [WP-48]
+ |--------------------------------------------------------------------------
+ |
+ | Authorize.Net is the gateway, not the processor. A card chargeback is
+ | settled between the cardholder's issuer and the merchant's acquirer: no
+ | webhook, no API call, no transaction status. The poll cannot catch one
+ | however long it looks, so a person records it — and the money has to move
+ | exactly as it would have done had the gateway told us.
+ |
+ */
+
+it('AC-PAY-25 restores everything when an admin records a card chargeback', function () {
+    $payment = pendingCard();
+
+    $this->batches = ['B1' => [settledTransaction('60999888777', ['settleAmount' => '504.95'])]];
+    $this->reconciliation->run();
+
+    // Settled: $500 rent and $4.95 fee, netting to zero.
+    expect($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('0.00');
+
+    $this->reconciliation->recordChargeback(
+        $payment->fresh(),
+        'Cardholder disputed the charge as unrecognised',
+        '4853',
+    );
+
+    $fee = LedgerEntry::where('category', 'convenience_fee')->sole();
+
+    expect($payment->fresh()->status)->toBe('returned')
+        ->and($payment->fresh()->return_code)->toBe('4853')
+        ->and($payment->fresh()->return_description)->toBe('Cardholder disputed the charge as unrecognised')
+        // [D-22] The status change IS the restoration — `returned` is not a
+        // balance-affecting status, so the $500 is owed again.
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00')
+        // The fee goes back with the payment that caused it. Billing someone
+        // $4.95 for the privilege of a payment taken away from them is not
+        // defensible whoever took it away.
+        ->and($fee->status)->toBe('returned')
+        // D-02: the rent this had covered is outstanding again.
+        ->and(PaymentAllocation::where('payment_id', $payment->id)->whereNull('reversed_at')->count())->toBe(0)
+        // No automatic returned-payment fee on a card: a disputed charge is
+        // not a bounced one, and where the cause was fraud the resident did
+        // nothing. It goes to an admin as a decision instead.
+        ->and(LedgerEntry::where('category', 'returned_fee')->count())->toBe(0)
+        ->and(DB::table('audit_logs')->where('action', 'payment.card_disputed')->count())->toBe(1)
+        // Who decided, since the gateway did not tell us — the only
+        // provenance this record will ever have.
+        ->and(DB::table('audit_logs')->where('action', 'payment.chargeback.recorded')->count())->toBe(1);
+});
+
+it('AC-PAY-25 refuses to record the same chargeback twice', function () {
+    $payment = pendingCard();
+
+    $this->batches = ['B1' => [settledTransaction('60999888777', ['settleAmount' => '504.95'])]];
+    $this->reconciliation->run();
+
+    $this->reconciliation->recordChargeback($payment->fresh(), 'Disputed', '4853');
+
+    // A second attempt would restore the balance twice — $1,000 owed on a
+    // $500 charge — which is the whole reason D-22 is a status transition.
+    expect(fn () => $this->reconciliation->recordChargeback($payment->fresh(), 'Disputed again', '4853'))
+        ->toThrow(Illuminate\Validation\ValidationException::class);
+
+    expect($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-25 refuses a payment that was never settled', function () {
+    $payment = pendingCard();
+
+    // Pending money is in no balance (I-6), so there is nothing to restore and
+    // "charged back" is not what happened to it.
+    expect(fn () => $this->reconciliation->recordChargeback($payment, 'Disputed', '4853'))
+        ->toThrow(Illuminate\Validation\ValidationException::class);
+
+    expect($payment->fresh()->status)->toBe('pending');
+});
+
+it('AC-PAY-25 records a late bank return by hand on the same path', function () {
+    $payment = pendingEcheck();
+
+    $this->batches = ['B1' => [settledTransaction('60123456789')]];
+    $this->reconciliation->run();
+
+    // An R01 that arrives after the reconciliation window has closed is the
+    // same problem with a different cause. Refusing it here would only mean
+    // doing it in the ledger by hand, where none of this would happen.
+    $this->reconciliation->recordChargeback($payment->fresh(), 'Insufficient funds', 'R01');
+
+    expect($payment->fresh()->status)->toBe('returned')
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('535.00')
+        // Unlike a card, a bounced bank payment does carry the agreed fee.
+        ->and(LedgerEntry::where('category', 'returned_fee')->count())->toBe(1);
+});
+
+it('AC-PAY-26 surfaces a transaction status it has never seen', function () {
+    pendingEcheck();
+
+    $this->batches = ['B1' => [settledTransaction('60123456789', ['transactionStatus' => 'somethingNewEntirely'])]];
+    $this->reconciliation->run();
+
+    $row = DB::table('audit_logs')->where('action', 'payment.status.unrecognised')->sole();
+
+    // Doing nothing with an unrecognised status is what made the card gap
+    // silent. The literal word is recorded so that classifying it is a
+    // one-line change rather than another investigation.
+    expect(json_decode($row->changes, true)['transaction_status'])->toBe('somethingNewEntirely')
+        // Unrecognised is not the same as failed: nothing moves on a guess.
+        ->and(Payment::sole()->status)->toBe('pending')
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-26 stays quiet about a payment that is merely still in flight', function () {
+    pendingEcheck();
+
+    $this->batches = ['B1' => [settledTransaction('60123456789', ['transactionStatus' => 'capturedPendingSettlement'])]];
+    $this->reconciliation->run();
+
+    // Every pending payment looks like this every morning. An alert that fires
+    // daily for normal behaviour is an alert that stops being read.
+    expect(DB::table('audit_logs')->where('action', 'payment.status.unrecognised')->count())->toBe(0);
+});

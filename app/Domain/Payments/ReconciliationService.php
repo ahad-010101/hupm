@@ -17,6 +17,8 @@ use App\Support\Settings;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
@@ -87,6 +89,22 @@ class ReconciliationService
      */
     private const FAILED_STATUSES = [
         'returnedItem', 'declined', 'voided', 'expired', 'failedReview', 'settlementError',
+    ];
+
+    /**
+     * Still in flight. Normal, seen every day, and no reason to shout.  [WP-48]
+     *
+     * The list exists so that `apply()` can tell "nothing has happened yet"
+     * apart from "a word we have never met". Without it, raising the second
+     * would mean raising the first every morning for every pending payment,
+     * which is how an alert stops being read.
+     */
+    private const IN_FLIGHT_STATUSES = [
+        'authorizedPendingCapture', 'capturedPendingSettlement', 'underReview',
+        'approvedReview', 'FDSPendingReview', 'FDSAuthorizedPendingReview',
+        'updatingSettlement', 'authorizedPendingRelease', 'pendingFinalSettlement',
+        'pendingSettlement', 'refundPendingSettlement', 'returnedItemPendingSettlement',
+        'refundSettledSuccessfully',
     ];
 
     /** NOCs change no payment status, so attempt()'s before/after cannot see them. */
@@ -296,7 +314,14 @@ class ReconciliationService
 
             if ($isReturn) {
                 $this->markReturned($locked, $transaction, $return);
+
+                return;
             }
+
+            // [WP-48] Neither settled, nor a failure, nor a word we know to be
+            // harmless. Doing nothing here is what made the card gap silent,
+            // and the next unrecognised status would have gone the same way.
+            $this->reportUnknownStatus($locked, $status);
         });
     }
 
@@ -363,6 +388,104 @@ class ReconciliationService
      * @param  array<string, mixed>  $transaction
      * @param  array<string, mixed>|null  $return
      */
+    /**
+     * An admin records a chargeback the gateway will never report.  [WP-48]
+     *
+     * **This exists because Authorize.Net is the gateway, not the processor.**
+     * A chargeback is settled between the cardholder's issuer and the
+     * merchant's acquirer; there is no webhook, no API call and no transaction
+     * status for it, so the nightly poll cannot see one however long it looks.
+     * The acquirer tells the client, and the client tells the system — here.
+     *
+     * It reuses `markReturned()` unchanged rather than restoring the balance a
+     * second way. Everything a returned payment already does is right for a
+     * chargeback: the status transition restores the balance (D-22), the
+     * allocations reverse, the convenience fee goes back with the payment that
+     * caused it, and `postReturnedFee()` declines to charge a returned-payment
+     * fee on a card because a disputed charge is not a bounced one — it raises
+     * that as a decision for a person instead.
+     *
+     * Works for a bank transfer too. An ACH return that arrives after the
+     * reconciliation window has closed is the same problem with a different
+     * cause, and refusing it here would only mean doing it by hand in the
+     * ledger, where none of the above would happen.
+     */
+    public function recordChargeback(Payment $payment, string $description, string $code = ''): Payment
+    {
+        return DB::transaction(function () use ($payment, $description, $code) {
+            // The same lock the nightly run takes. An admin recording this
+            // while reconciliation is mid-flight must not double-restore.
+            /** @var Payment $locked */
+            $locked = Payment::with(['tenant', 'lease'])
+                ->whereKey($payment->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($locked->status === Payment::STATUS_RETURNED) {
+                throw ValidationException::withMessages([
+                    'reason' => 'This payment is already recorded as returned, so the balance has '
+                        .'already been put back. Nothing further is needed.',
+                ]);
+            }
+
+            if ($locked->status !== Payment::STATUS_SETTLED) {
+                throw ValidationException::withMessages([
+                    'reason' => 'Only a settled payment can be charged back. This one is '
+                        .$locked->status.', so it is not counted in any balance and there is '
+                        .'nothing to restore.',
+                ]);
+            }
+
+            $this->markReturned($locked, [], [
+                'code' => $code,
+                'description' => $description,
+            ]);
+
+            // Separate from markReturned()'s own `payment.returned` row: that
+            // one says what happened to the money, this one says a person
+            // decided it had, and which person. The gateway did not tell us,
+            // so who did is the only provenance this record will ever have.
+            $this->audit->record('payment.chargeback.recorded', $locked, [
+                'amount' => $locked->amount->toDecimalString(),
+                'method' => $locked->method,
+                'return_code' => $code,
+                'reason' => $description,
+                'entered_by_hand' => true,
+            ]);
+
+            return $locked->refresh();
+        });
+    }
+
+    /**
+     * A status we have never seen, put in front of a person.  [WP-48]
+     *
+     * Audit rather than a new alert type, following `alertCardDispute()`:
+     * `audit_logs` is already the admin-visible record (WP-29). The log line
+     * carries the literal status so that adding it to the right list is a
+     * one-line change by whoever reads it, rather than another investigation.
+     */
+    private function reportUnknownStatus(Payment $payment, string $status): void
+    {
+        if ($status === '' || in_array($status, self::IN_FLIGHT_STATUSES, true)) {
+            return;
+        }
+
+        $this->audit->record('payment.status.unrecognised', $payment, [
+            'transaction_status' => substr($status, 0, 60),
+            'payment_status' => $payment->status,
+            'method' => $payment->method,
+            'amount' => $payment->amount->toDecimalString(),
+            'action_required' => 'Decide whether this status means settled, failed, or still in '
+                .'flight, and add it to the matching list in ReconciliationService.',
+        ]);
+
+        Log::warning('Authorize.Net returned a transaction status this system does not know.', [
+            'payment_id' => $payment->id,
+            'transaction_status' => $status,
+        ]);
+    }
+
     private function markReturned(Payment $payment, array $transaction, ?array $return): void
     {
         $entry = $this->entryFor($payment);

@@ -202,6 +202,16 @@ class SettingsCatalogue
                     .'plus 30¢ against about 25¢ for a bank transfer — set a convenience fee below '
                     .'if residents should cover that.',
                 'input' => 'bool',
+                // [WP-48] Stated where the switch is, because it is a duty the
+                // client takes on by flipping it, not a technical footnote.
+                'warning' => 'A card chargeback is NOT detected automatically, and cannot be. '
+                    .'Authorize.Net is the payment gateway, not the card processor — a chargeback '
+                    .'is settled between the cardholder\'s bank and yours, and the gateway is never '
+                    .'told. When your merchant services provider writes to you about a disputed '
+                    .'payment, somebody must record it on the Payments screen; until they do, the '
+                    .'resident will show as paid for money that has already been taken back. '
+                    .'Bank transfers are unaffected — a returned eCheck is reported and handled '
+                    .'automatically.',
             ],
             'payments.card_convenience_fee_percent' => [
                 'group' => 'Payment methods',

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import DataTable from '@/Components/DataTable';
@@ -39,6 +40,29 @@ export default function Index({
     flash = {},
 }) {
     const rerun = useForm({});
+
+    // [WP-48] The one payment outcome a person has to enter. A card chargeback
+    // is settled between the issuer and the acquirer, so the gateway never
+    // reports it — the acquirer's letter arrives in the post and this is where
+    // it becomes a ledger movement.
+    //
+    // An inline panel rather than a dialog: it asks for typed input, and a
+    // modal that steals focus on every keystroke is a bug this project has
+    // already had once.
+    const [chargebackFor, setChargebackFor] = useState(null);
+    const chargeback = useForm({ reason: '', code: '' });
+
+    const submitChargeback = (event) => {
+        event.preventDefault();
+
+        chargeback.post(`/admin/payments/${chargebackFor.id}/chargeback`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                chargeback.reset();
+                setChargebackFor(null);
+            },
+        });
+    };
 
     const setStatus = (status) => {
         router.get('/admin/payments', status ? { status } : {}, { preserveScroll: true });
@@ -121,6 +145,15 @@ export default function Index({
                     {p.flagged && (
                         <span className="block text-sm text-gray-600">Awaiting reconciliation</span>
                     )}
+                    {p.status === 'settled' && (
+                        <button
+                            type="button"
+                            onClick={() => setChargebackFor(p)}
+                            className="mt-1 block text-sm font-medium text-brand-700 underline hover:text-brand-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                        >
+                            {p.method === 'card' ? 'Record a chargeback' : 'Record a return'}
+                        </button>
+                    )}
                 </span>
             ),
         },
@@ -131,6 +164,87 @@ export default function Index({
             <Head title="Payments" />
 
             {flash.status && <Alert tone="success" className="mb-4">{flash.status}</Alert>}
+
+            {chargebackFor && (
+                <form
+                    onSubmit={submitChargeback}
+                    className="mb-4 rounded-lg border border-overdue-border bg-white p-4"
+                >
+                    <h2 className="text-base font-semibold text-gray-900">
+                        {chargebackFor.method === 'card' ? 'Record a chargeback' : 'Record a return'}
+                    </h2>
+                    <p className="mt-1 max-w-prose text-base text-gray-700">
+                        {chargebackFor.tenant} — <Money value={chargebackFor.amount} /> taken on{' '}
+                        {chargebackFor.received_on}.
+                    </p>
+                    <p className="mt-2 max-w-prose text-base text-gray-600">
+                        This puts the money back on their account: the payment stops counting, the
+                        charges it covered are outstanding again, and any fee charged for making it
+                        goes back with it. The resident is emailed the reason you give below.
+                        {chargebackFor.method === 'card' && (
+                            <> No returned-payment fee is charged automatically on a card — that is
+                            a decision for you, on the ledger.</>
+                        )}
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap gap-3">
+                        <div className="min-w-0 flex-1">
+                            <label htmlFor="cb-reason" className="block text-base font-medium text-gray-900">
+                                Why it came back
+                            </label>
+                            <input
+                                id="cb-reason"
+                                type="text"
+                                value={chargeback.data.reason}
+                                onChange={(e) => chargeback.setData('reason', e.target.value)}
+                                placeholder="Cardholder disputed the charge as unrecognised"
+                                className="mt-1 min-h-touch w-full rounded-md border-gray-300 text-base"
+                                required
+                            />
+                            {chargeback.errors.reason && (
+                                <p className="mt-1 text-base text-overdue-fg">{chargeback.errors.reason}</p>
+                            )}
+                        </div>
+                        <div>
+                            <label htmlFor="cb-code" className="block text-base font-medium text-gray-900">
+                                Code <span className="font-normal text-gray-600">(optional)</span>
+                            </label>
+                            <input
+                                id="cb-code"
+                                type="text"
+                                value={chargeback.data.code}
+                                onChange={(e) => chargeback.setData('code', e.target.value)}
+                                placeholder="4853"
+                                className="mt-1 min-h-touch w-32 rounded-md border-gray-300 text-base"
+                            />
+                            {chargeback.errors.code && (
+                                <p className="mt-1 text-base text-overdue-fg">{chargeback.errors.code}</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                            type="submit"
+                            disabled={chargeback.processing}
+                            className="min-h-touch rounded-md bg-overdue-fg px-4 text-base font-semibold text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-50"
+                        >
+                            {chargeback.processing ? 'Recording…' : 'Record it'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                chargeback.reset();
+                                chargeback.clearErrors();
+                                setChargebackFor(null);
+                            }}
+                            className="min-h-touch rounded-md border border-gray-300 px-3 text-base font-medium hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            )}
             {flash.error && <Alert tone="error" className="mb-4">{flash.error}</Alert>}
 
             {/* UI §3.9: the last successful reconciliation must be visible at

@@ -6,6 +6,7 @@ use App\Domain\Payments\AllocationService;
 use App\Domain\Payments\PaymentRecordingService;
 use App\Domain\Payments\ReconciliationService;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\RecordChargebackRequest;
 use App\Http\Requests\Admin\RecordPaymentRequest;
 use App\Http\Requests\Admin\RecordRemittanceRequest;
 use App\Jobs\ReconcilePayments;
@@ -37,6 +38,7 @@ class PaymentController extends Controller
         private readonly PaymentRecordingService $payments,
         private readonly AllocationService $allocations,
         private readonly BusinessCalendar $calendar,
+        private readonly ReconciliationService $reconciliation,
     ) {}
 
     /** API-ADM-14. */
@@ -131,6 +133,34 @@ class PaymentController extends Controller
      * An admin chasing a payment that should have cleared needs the answer the
      * job would have given, not a different one.
      */
+    /**
+     * Record a chargeback the gateway will never report.  [WP-48, API-ADM-17]
+     *
+     * The only payment outcome in this system that a human has to enter,
+     * because it is the only one Authorize.Net does not observe: a card
+     * chargeback is settled between the issuer and the acquirer, and the
+     * gateway is not a party to it. The acquirer writes to the client, and
+     * this is where that letter becomes a ledger movement.
+     *
+     * No business logic here (I-11) — the service does the whole of it, and
+     * does it by reusing the ordinary returned-payment path so a chargeback
+     * cannot restore a balance by some second route of its own.
+     */
+    public function chargeback(RecordChargebackRequest $request, Payment $payment): RedirectResponse
+    {
+        $this->reconciliation->recordChargeback(
+            $payment,
+            $request->string('reason')->value(),
+            $request->string('code')->value(),
+        );
+
+        return back()->with(
+            'status',
+            'Recorded. The payment no longer counts towards the balance, the charges it covered '
+            .'are outstanding again, and any fee charged for making it has gone back.',
+        );
+    }
+
     public function reconcile(): RedirectResponse
     {
         // Through the job, not straight to the service. Both run the same

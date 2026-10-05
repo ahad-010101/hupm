@@ -298,6 +298,15 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function () {
         // implementation of it.
         Route::post('payments/reconcile', [PaymentController::class, 'reconcile'])->name('payments.reconcile');
 
+        // [WP-48] The one payment outcome a person has to enter, because the
+        // gateway never observes it: a card chargeback is settled between the
+        // issuer and the acquirer and Authorize.Net is not a party to it.
+        //
+        // Two segments after `payments`, so it cannot shadow the literal
+        // one-segment routes above however the model key is spelled.
+        Route::post('payments/{payment}/chargeback', [PaymentController::class, 'chargeback'])
+            ->name('payments.chargeback');
+
         // [GATE Q-2, R-9] One authority cheque covering many tenants.
         Route::get('payments/remittance', [PaymentController::class, 'remittance'])->name('payments.remittance');
         Route::post('payments/remittance', [PaymentController::class, 'storeRemittance'])->name('payments.remittance.store');
