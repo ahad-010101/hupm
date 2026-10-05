@@ -77,6 +77,22 @@ beforeEach(function () {
     ]);
 });
 
+it('AC-LED-20 clears entries that reverse other entries', function () {
+    // The bug production found and the fixtures missed.
+    // `ledger_entries.reverses_entry_id` is a SELF-referencing foreign key —
+    // a correction is a reversing entry, never an edit (I-3) — so a bulk
+    // delete fails on the table's own constraint. Every row is both a parent
+    // and a child. There were 129 of these on the live system.
+    $this->ledger->reverse($this->charge, 'Charged in error');
+
+    expect(LedgerEntry::whereNotNull('reverses_entry_id')->count())->toBe(1);
+
+    $this->artisan('hupm:ledger-reset --force')->assertSuccessful();
+
+    expect(LedgerEntry::count())->toBe(0)
+        ->and(Lease::count())->toBe(1);
+});
+
 it('AC-LED-20 empties the ledger and leaves the portfolio standing', function () {
     expect(LedgerEntry::count())->toBe(2);
 

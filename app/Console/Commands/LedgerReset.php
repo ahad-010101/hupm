@@ -132,6 +132,20 @@ class LedgerReset extends Command
         }
 
         DB::transaction(function () use ($counts) {
+            // `ledger_entries.reverses_entry_id` points at another row in the
+            // same table: a correction is a reversing entry, never an edit
+            // (I-3). A bulk delete therefore fails on its own foreign key —
+            // MySQL will not drop a parent while a child still references it,
+            // and every row here is both. Dropping the pointer first is safe
+            // precisely because all of them are going.
+            //
+            // Found on production, where 129 reversing entries existed. The
+            // first version of this command had no such rows in its fixtures
+            // and passed every test.
+            DB::table('ledger_entries')
+                ->whereNotNull('reverses_entry_id')
+                ->update(['reverses_entry_id' => null]);
+
             foreach (self::CLEAR as $table) {
                 DB::table($table)->delete();
             }
