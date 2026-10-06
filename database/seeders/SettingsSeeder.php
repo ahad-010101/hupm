@@ -51,6 +51,8 @@ class SettingsSeeder extends Seeder
                 'Q-8. What happens to an overpayment remainder: credit_forward or refund.'],
 
             // ── Charges ─────────────────────────────────────────────────────
+            ['charges.post_from_period', '', 'string', false,
+                'WP-51. First month this system is the record for; rent never posts before it. Blank charges from each lease start date, which on these tenancies reaches back to 2007.'],
             ['charges.proration_method', 'daily', 'string', true,
                 'Q-10. Proration convention for partial months.'],
 

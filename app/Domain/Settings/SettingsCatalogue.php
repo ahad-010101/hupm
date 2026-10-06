@@ -239,6 +239,21 @@ class SettingsCatalogue
                     .'before the payment is taken, so every card is charged the same. Take advice '
                     .'before setting this above zero.',
             ],
+            'charges.post_from_period' => [
+                'group' => 'Charges',
+                'label' => 'Opening month (YYYY-MM)',
+                'help' => 'The first month this system is the record for. Rent is never charged '
+                    .'for a month before it, however far back the lease runs. Leave blank to '
+                    .'charge every month from each lease start date — which on these tenancies '
+                    .'means 2007 onwards. Set it to the month you went live and let the previous '
+                    .'system own what came before.',
+                'input' => 'text',
+                'pattern' => '/^(\d{4}-(0[1-9]|1[0-2]))?$/',
+                'warning' => 'Changing this does not delete anything. Moving it EARLIER will '
+                    .'back-post every month you have opened up, on the next nightly run. Moving '
+                    .'it later stops future posting but leaves charges already made standing — '
+                    .'use hupm:ledger-open-from to move the boundary and clear behind it together.',
+            ],
             'payments.echeck_fee_percent' => [
                 'group' => 'Payment methods',
                 'label' => 'Bank transfer fee (% of the payment)',
@@ -347,8 +362,12 @@ class SettingsCatalogue
             // Long-form copy for the public site. The column is TEXT, but a
             // ceiling still applies — a settings row is not a document store.
             'textarea' => mb_strlen($value) <= ($spec['max'] ?? 5000),
-            // Free text still has a ceiling; the column is not unbounded.
-            default => mb_strlen($value) <= 255,
+            // Free text still has a ceiling; the column is not unbounded. A
+            // spec may also declare a `pattern`, for the settings whose shape
+            // matters more than their length — a month that is not a month
+            // would be read by the charge engine, not by a person.
+            default => mb_strlen($value) <= 255
+                && (! isset($spec['pattern']) || preg_match($spec['pattern'], $value) === 1),
         };
     }
 

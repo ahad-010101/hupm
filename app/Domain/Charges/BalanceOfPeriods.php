@@ -4,7 +4,9 @@ namespace App\Domain\Charges;
 
 use App\Models\Lease;
 use App\Support\BusinessCalendar;
+use App\Support\Settings;
 use Carbon\CarbonImmutable;
+use RuntimeException;
 
 /**
  * Which periods a lease should have been charged for by a given date.
@@ -21,7 +23,10 @@ use Carbon\CarbonImmutable;
  */
 class BalanceOfPeriods
 {
-    public function __construct(private readonly BusinessCalendar $calendar) {}
+    public function __construct(
+        private readonly BusinessCalendar $calendar,
+        private readonly Settings $settings,
+    ) {}
 
     /**
      * Periods this lease owes a charge for, oldest first.
@@ -50,6 +55,23 @@ class BalanceOfPeriods
 
         $periods = [];
         $cursor = $start->startOfMonth();
+
+        // [WP-51] The opening period: the month this system became the record.
+        //
+        // These leases run back to 2007, and "what is due" taken literally
+        // means every month since — 3,474 rows of rent nobody is going to
+        // collect, against a system that was not keeping the books at the
+        // time. The earlier periods belong to whatever did.
+        //
+        // A floor rather than a rewritten `start_date`, because a lease's
+        // start date is a fact about a tenancy and not ours to edit. Proration
+        // still keys on the real start, so a lease beginning mid-month inside
+        // the opening period is charged from the day they moved in.
+        $floor = $this->openingPeriodStart($tz);
+
+        if ($floor !== null && $floor->greaterThan($cursor)) {
+            $cursor = $floor;
+        }
 
         // A lease running past `asOf` simply stops there; one that ended stops
         // at its end date. Charges never post beyond either.
@@ -98,5 +120,31 @@ class BalanceOfPeriods
         }
 
         return $periods;
+    }
+
+    /**
+     * The first month this system is the record for, or null for all of time.
+     *
+     * Refuses a malformed value rather than ignoring it. Treating a typo as
+     * "no floor" would quietly back-post every month since 2007 on the next
+     * nightly run, which is exactly the outcome the setting exists to prevent
+     * — and the job catches this per lease and reports it (AC-CHG-04).
+     */
+    private function openingPeriodStart(string $tz): ?CarbonImmutable
+    {
+        $value = trim($this->settings->string('charges.post_from_period', ''));
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $value) !== 1) {
+            throw new RuntimeException(
+                "charges.post_from_period is '{$value}', which is not a YYYY-MM month. "
+                .'Refusing to post rather than guessing at the boundary.'
+            );
+        }
+
+        return CarbonImmutable::parse($value.'-01', $tz)->startOfDay();
     }
 }
