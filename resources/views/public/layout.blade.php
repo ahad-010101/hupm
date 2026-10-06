@@ -44,10 +44,33 @@
                 @endforeach
             </nav>
 
-            <a href="{{ route('login') }}"
-               class="ml-auto inline-flex min-h-touch items-center rounded-md bg-brand-600 px-4 py-2 text-base font-semibold text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
-                Tenant Login
-            </a>
+            {{-- [WP-54] Somebody already signed in was still being told to log
+                 in. The public group keeps StartSession (D-05 drops only
+                 Inertia), so the session is readable here — and the response is
+                 `Cache-Control: no-cache, private`, so this cannot be served to
+                 the wrong person from a shared cache.
+
+                 Initials, not the name: AC-PUB-01 says no tenant name belongs
+                 in a public response, and "JD" keeps that plainly true.
+
+                 A link, not a menu. These eight pages ship no JavaScript at all
+                 (D-05) because Emergency Maintenance has to render on a bad
+                 connection, so a dropdown is not available and is not missed. --}}
+            @auth
+                <a href="{{ auth()->user()->homeRoute() }}"
+                   class="ml-auto inline-flex min-h-touch items-center gap-2 rounded-md border border-gray-300 py-1.5 pl-1.5 pr-3 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+                    <span aria-hidden="true"
+                          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">
+                        {{ auth()->user()->initials() }}
+                    </span>
+                    <span class="text-base font-medium text-gray-900">My account</span>
+                </a>
+            @else
+                <a href="{{ route('login') }}"
+                   class="ml-auto inline-flex min-h-touch items-center rounded-md bg-brand-600 px-4 py-2 text-base font-semibold text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+                    Tenant Login
+                </a>
+            @endauth
         </div>
     </header>
 

@@ -128,6 +128,26 @@ class User extends Authenticatable
     }
 
     /** Where this user lands after login (FR-AUTH-01 step 5). */
+    /**
+     * Two letters for the avatar in the public header.  [WP-54]
+     *
+     * Initials rather than the name itself. AC-PUB-01 says no tenant name may
+     * appear in a public response, and while this one is the viewer's own and
+     * the response is `Cache-Control: private`, "JD" keeps the rule plainly
+     * true instead of relying on an argument about whose name it is.
+     */
+    public function initials(): string
+    {
+        $words = array_values(array_filter(preg_split('/\s+/', trim((string) $this->name)) ?: []));
+
+        $letters = array_map(
+            static fn (string $word): string => mb_strtoupper(mb_substr($word, 0, 1)),
+            array_slice($words, 0, 2),
+        );
+
+        return implode('', $letters) ?: '?';
+    }
+
     public function homeRoute(): string
     {
         return match ($this->role) {
