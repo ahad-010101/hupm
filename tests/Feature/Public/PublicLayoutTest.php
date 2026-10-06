@@ -137,3 +137,32 @@ it('AC-PUB-01 ships no JavaScript to a signed-in visitor either', function () {
     // The avatar must not have quietly introduced a menu that needs a bundle.
     $this->actingAs($user)->get('/')->assertDontSee('data-page', escape: false);
 });
+
+it('AC-PUB-06 turns a content login button into the way back to the account', function () {
+    $user = App\Models\User::factory()->create(['role' => 'tenant', 'name' => 'Jane Doe']);
+
+    // The hero's primary button is content — an editor picked the `login`
+    // route. Right for the visitor it was written for; wrong for somebody who
+    // is already logged in.
+    $this->actingAs($user)->get('/')
+        ->assertSee('Go to your account')
+        ->assertDontSee('Resident login');
+});
+
+it('AC-PUB-06 leaves every other content button alone', function () {
+    $user = App\Models\User::factory()->create(['role' => 'tenant', 'name' => 'Jane Doe']);
+
+    // Only `login` is rewritten. A signed-in visitor still wants the emergency
+    // page to be the emergency page.
+    $this->actingAs($user)->get('/')->assertSee('Emergency maintenance');
+});
+
+it('AC-PUB-06 sends a content login button to the right place per role', function (string $role, string $home) {
+    $user = App\Models\User::factory()->create(['role' => $role, 'name' => 'Sam Taylor']);
+
+    $this->actingAs($user)->get('/')->assertSee($home);
+})->with([
+    ['admin', '/admin'],
+    ['vendor', '/work'],
+    ['housing_authority', '/agency'],
+]);
