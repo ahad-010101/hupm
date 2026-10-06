@@ -129,10 +129,15 @@ class DashboardQuery
                     'hint' => 'Rent split, due day and grace. Charges post from these.',
                 ],
                 [
-                    'label' => 'Import the opening balances',
+                    // The importer was descoped on 27 Aug 2026; the opening
+                    // balances it was to carry were not. This pointed at
+                    // `/admin/import`, which has no route at all any more, so
+                    // the last step of a new installation's checklist led to a
+                    // 404.
+                    'label' => 'Enter the opening balances',
                     'done' => DB::table('ledger_entries')->exists(),
-                    'href' => '/admin/import',
-                    'hint' => 'Bring what is owed across from Rent Manager.',
+                    'href' => '/admin/ledger',
+                    'hint' => 'Bring what is owed across from Rent Manager, as an adjustment on each resident.',
                 ],
             ],
         ];
@@ -329,7 +334,12 @@ class DashboardQuery
                 'days_left' => $lease->end_date
                     ? (int) $today->diffInDays($this->calendar->toBusinessDate($lease->end_date))
                     : null,
-                'href' => "/admin/leases/{$lease->id}",
+                // `/edit` is the lease screen. The resource route is
+                // declared `->except(['show'])`, so the bare path exists for
+                // PUT and DELETE and for no GET at all — which is why clicking
+                // a row answered 405 rather than 404, and why it read as a
+                // server fault rather than a wrong link.
+                'href' => "/admin/leases/{$lease->id}/edit",
             ])
             ->all();
     }
