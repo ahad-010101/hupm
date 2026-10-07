@@ -295,4 +295,45 @@ class LedgerService
             return $entry->refresh();
         });
     }
+
+    /**
+     * Erase entries wholesale.  [WP-50, WP-51 — and I-2 is why it lives here]
+     *
+     * **This deliberately breaks I-3**, which says ledger rows are immutable
+     * and corrections are reversing entries. WP-52 settled that reversing is
+     * the right instrument for history worth keeping; this remains for the
+     * case it was built for — an installation clearing data that was never
+     * real. It is a named method on the sole writer rather than a DELETE in a
+     * console command precisely so that the exception is visible next to the
+     * rule it breaks.
+     *
+     * **I-2 is the mechanical reason it is here at all.** `LedgerService` is
+     * the only class permitted to write `ledger_entries`, and an architecture
+     * test enforces it. The first versions of `hupm:ledger-reset` and
+     * `hupm:ledger-open-from` wrote directly and shipped, because those
+     * commits ran their own tests and not that one.
+     *
+     * The caller wraps this in its own transaction.
+     */
+    public function eraseEntries(?CarbonImmutable $before = null): int
+    {
+        $doomed = DB::table('ledger_entries')
+            ->when($before, fn ($q) => $q->whereDate('posted_on', '<', $before->toDateString()))
+            ->pluck('id');
+
+        if ($doomed->isEmpty()) {
+            return 0;
+        }
+
+        // `reverses_entry_id` points at another row in this same table, so
+        // every row is both a parent and a child and a bulk delete cannot
+        // order itself. Dropping the pointer first is safe precisely because
+        // the rows it describes are going. Found on production, where 129
+        // reversing entries refused the delete.
+        DB::table('ledger_entries')
+            ->whereIn('reverses_entry_id', $doomed)
+            ->update(['reverses_entry_id' => null]);
+
+        return DB::table('ledger_entries')->whereIn('id', $doomed)->delete();
+    }
 }

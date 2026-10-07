@@ -5,6 +5,7 @@ import UserMenu from '@/Components/UserMenu';
 import {
     BanknotesIcon,
     BookOpenIcon,
+    BuildingLibraryIcon,
     BuildingOffice2Icon,
     ChartBarIcon,
     ClipboardDocumentCheckIcon,
@@ -89,6 +90,19 @@ const NAV_GROUPS = [
              | than an invented shape, so there was nothing to put behind this
              | link that would not have been rebuilt.
              */
+            /*
+             | [WP-55] Housing authorities (WP-43) had a screen, an invite flow
+             | and a portal, and no way in from the sidebar — reachable only by
+             | typing the URL. UI §2.3 fixes this group as Import · Vendors ·
+             | Users · Settings; this is the second documented departure after
+             | D-27's Public site, and it sits beside Vendors because the two
+             | are the same kind of thing: an outside party with its own portal
+             | and its own invitation.
+             |
+             | It matters more than Vendors here. The authority funds most of
+             | the rent on 25 of 29 leases.
+             */
+            { href: '/admin/housing-authorities', label: 'Housing authorities', icon: BuildingLibraryIcon },
             { href: '/admin/vendors', label: 'Vendors', icon: TruckIcon },
             /*
              | Users (API-ADM-39) is hidden, not built — client decision,

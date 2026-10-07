@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Ledger\LedgerService;
+use App\Domain\Payments\AllocationService;
 use App\Support\AuditLogger;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -49,8 +51,9 @@ class LedgerReset extends Command
      * constraint rather than silently orphaning rows.
      */
     private const CLEAR = [
-        'payment_allocations',
-        'ledger_entries',
+        // `payment_allocations` and `ledger_entries` are NOT in this list.
+        // They belong to AllocationService and LedgerService respectively
+        // (I-2) and are cleared through them above.
         'payments',
         // Derived from balances that will no longer exist. Left behind, a
         // lease stays in Management Review against nothing.
@@ -68,9 +71,16 @@ class LedgerReset extends Command
         'recurring_payments',
     ];
 
-    public function handle(AuditLogger $audit): int
+    public function handle(
+        AuditLogger $audit,
+        LedgerService $ledger,
+        AllocationService $allocations,
+    ): int
     {
-        $counts = [];
+        $counts = [
+            'payment_allocations' => DB::table('payment_allocations')->count(),
+            'ledger_entries' => DB::table('ledger_entries')->count(),
+        ];
 
         foreach (self::CLEAR as $table) {
             $counts[$table] = DB::table($table)->count();
@@ -131,20 +141,17 @@ class LedgerReset extends Command
             }
         }
 
-        DB::transaction(function () use ($counts) {
-            // `ledger_entries.reverses_entry_id` points at another row in the
-            // same table: a correction is a reversing entry, never an edit
-            // (I-3). A bulk delete therefore fails on its own foreign key —
-            // MySQL will not drop a parent while a child still references it,
-            // and every row here is both. Dropping the pointer first is safe
-            // precisely because all of them are going.
+        DB::transaction(function () use ($counts, $ledger, $allocations) {
+            // [I-2] Through the owning services, not DB::table() here.
+            // `LedgerService` is the only class permitted to write
+            // `ledger_entries` and `AllocationService` the only one permitted
+            // to write `payment_allocations`; an architecture test enforces
+            // both, and the first version of this command broke them.
             //
-            // Found on production, where 129 reversing entries existed. The
-            // first version of this command had no such rows in its fixtures
-            // and passed every test.
-            DB::table('ledger_entries')
-                ->whereNotNull('reverses_entry_id')
-                ->update(['reverses_entry_id' => null]);
+            // Allocations first: `charge_entry_id` references `ledger_entries`
+            // with RESTRICT.
+            $allocations->eraseAllocations();
+            $ledger->eraseEntries();
 
             foreach (self::CLEAR as $table) {
                 DB::table($table)->delete();

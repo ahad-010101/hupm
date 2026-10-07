@@ -8,6 +8,7 @@ use App\Models\PaymentAllocation;
 use App\Support\AuditLogger;
 use App\Support\Money;
 use App\Support\Settings;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -290,5 +291,43 @@ class AllocationService
     private function overpaymentBehaviour(): string
     {
         return $this->settings->string('payments.overpayment_behaviour', 'credit_forward');
+    }
+
+    /**
+     * Erase allocations wholesale.  [WP-50, WP-51]
+     *
+     * Here for the same reason `LedgerService::eraseEntries()` is there: an
+     * architecture test makes this class the only writer of
+     * `payment_allocations`, and a console command deleting from it directly
+     * is the violation that test exists to catch.
+     *
+     * Allocations go **first**, always. `charge_entry_id` references
+     * `ledger_entries` with RESTRICT, so a surviving allocation blocks the
+     * deletion of the charge it points at.
+     *
+     * The caller wraps this in its own transaction.
+     */
+    public function eraseAllocations(?CarbonImmutable $before = null): int
+    {
+        if ($before === null) {
+            return DB::table('payment_allocations')->delete();
+        }
+
+        // Each subquery is its own statement. Inlined, the architecture test
+        // scanning for a `ledger_entries` write cannot tell a subquery from a
+        // target and flags the delete below — correctly, on the evidence it
+        // has. Naming them is clearer to read and honest to the scanner.
+        $doomedCharges = DB::table('ledger_entries')
+            ->whereDate('posted_on', '<', $before->toDateString())
+            ->select('id');
+
+        $doomedPayments = DB::table('payments')
+            ->where('submitted_at', '<', $before)
+            ->select('id');
+
+        return DB::table('payment_allocations')
+            ->whereIn('charge_entry_id', $doomedCharges)
+            ->orWhereIn('payment_id', $doomedPayments)
+            ->delete();
     }
 }

@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Ledger\LedgerService;
+use App\Domain\Payments\AllocationService;
 use App\Support\AuditLogger;
 use App\Support\Settings;
 use Carbon\CarbonImmutable;
@@ -38,7 +40,12 @@ class LedgerOpenFrom extends Command
 
     protected $description = 'Set the opening month and delete every ledger entry and payment before it';
 
-    public function handle(Settings $settings, AuditLogger $audit): int
+    public function handle(
+        Settings $settings,
+        AuditLogger $audit,
+        LedgerService $ledger,
+        AllocationService $allocations,
+    ): int
     {
         $period = trim((string) $this->argument('period'));
 
@@ -92,24 +99,19 @@ class LedgerOpenFrom extends Command
             }
         }
 
-        DB::transaction(function () use ($boundary, $cutoff) {
-            $doomed = DB::table('ledger_entries')->whereDate('posted_on', '<', $cutoff)->pluck('id');
+        DB::transaction(function () use ($boundary, $ledger, $allocations) {
+            // [I-2] Through the owning services. LedgerService is the only
+            // class permitted to write `ledger_entries`, AllocationService the
+            // only one permitted to write `payment_allocations`, and an
+            // architecture test enforces both.
+            //
+            // Allocations first: `charge_entry_id` references `ledger_entries`
+            // with RESTRICT, so one left standing blocks its charge. The
+            // self-referencing `reverses_entry_id` is handled inside
+            // eraseEntries(), where the rest of that table's rules live.
+            $allocations->eraseAllocations($boundary);
+            $ledger->eraseEntries($boundary);
 
-            // An allocation points at a charge with RESTRICT, so every one
-            // touching a doomed charge — or a doomed payment — goes first.
-            DB::table('payment_allocations')->whereIn('charge_entry_id', $doomed)->delete();
-            DB::table('payment_allocations')
-                ->whereIn('payment_id', DB::table('payments')->where('submitted_at', '<', $boundary)->select('id'))
-                ->delete();
-
-            // `reverses_entry_id` is a self-reference: a correction is a
-            // reversing entry, never an edit (I-3). A surviving October
-            // reversal still pointing at a deleted September charge would
-            // block the delete, so the link is dropped — the row it described
-            // is going, which is what makes that safe.
-            DB::table('ledger_entries')->whereIn('reverses_entry_id', $doomed)->update(['reverses_entry_id' => null]);
-
-            DB::table('ledger_entries')->whereIn('id', $doomed)->delete();
             DB::table('payments')->where('submitted_at', '<', $boundary)->delete();
             DB::table('delinquency_events')->where('created_at', '<', $boundary)->delete();
         });
