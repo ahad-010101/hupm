@@ -983,3 +983,61 @@ it('AC-PAY-24 still holds a full_only resident to the whole of their rent', func
 
     expect(Payment::count())->toBe(0);
 });
+
+/*
+ |--------------------------------------------------------------------------
+ | A rail the gateway cannot actually take  [WP-56]
+ |--------------------------------------------------------------------------
+ |
+ | eCheck.Net is a separate service from the Authorize.Net gateway account.
+ | Without it the hosted page does NOT refuse `showBankAccount` — it ignores it
+ | and renders a card form. A resident who chose "Bank account", and was quoted
+ | the bank rate, is handed a card page, and whatever they type is recorded
+ | against a payment this system believes is an eCheck.
+ |
+ */
+
+it('AC-PAY-28 refuses a bank transfer when the rail is switched off', function () {
+    app(Settings::class)->set('payments.echeck_enabled', 'false');
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    // Refused server-side, not only hidden: the radio can be reconstructed by
+    // hand once it disappears, which is AC-DEL-04's reasoning.
+    $this->postJson('/portal/pay', payPayload())
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('method');
+
+    expect(Payment::count())->toBe(0)
+        ->and($this->balances->tenantBalance($this->tenant->id)->toDecimalString())->toBe('500.00');
+});
+
+it('AC-PAY-28 still takes a card while the bank rail is off', function () {
+    app(Settings::class)->set('payments.echeck_enabled', 'false');
+    app(Settings::class)->set('payments.cards_enabled', 'true');
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->postJson('/portal/pay', payPayload(['method' => 'card']))->assertOk();
+
+    expect(Payment::sole()->method)->toBe('card');
+});
+
+it('AC-PAY-28 tells the portal which rails are open', function () {
+    app(Settings::class)->set('payments.echeck_enabled', 'false');
+
+    $this->get('/portal/pay')->assertInertia(fn ($page) => $page
+        ->where('echeckEnabled', false)
+        ->where('cardsEnabled', false));
+});
+
+it('AC-PAY-28 leaves the bank rail open by default', function () {
+    // Every installation before this one offered bank transfer and must keep
+    // doing so; only the live host has it switched off.
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->postJson('/portal/pay', payPayload())->assertOk();
+
+    expect(Payment::sole()->method)->toBe('echeck');
+});

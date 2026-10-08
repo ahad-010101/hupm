@@ -213,6 +213,21 @@ class SettingsCatalogue
                     .'Bank transfers are unaffected — a returned eCheck is reported and handled '
                     .'automatically.',
             ],
+            'payments.echeck_enabled' => [
+                'group' => 'Payment methods',
+                'label' => 'Accept bank transfers (ACH)',
+                'help' => 'Lets residents and housing authorities pay from a bank account. '
+                    .'Switch this OFF if eCheck.Net is not enabled on the Authorize.Net merchant '
+                    .'account: the gateway silently ignores the request for bank fields and shows '
+                    .'a card form instead, so a resident who chose a bank transfer is quoted the '
+                    .'bank fee and then handed a card page.',
+                'input' => 'bool',
+                'warning' => 'eCheck.Net is a separate service from the gateway account and has '
+                    .'its own application. Check it is live before switching this on — '
+                    .'getMerchantDetails must list eCheck under paymentMethods, not just Visa and '
+                    .'Mastercard. With it off, bank transfer disappears from the resident payment '
+                    .'page and the housing authority portal says to contact the office.',
+            ],
             'payments.card_convenience_fee_percent' => [
                 'group' => 'Payment methods',
                 'label' => 'Card fee (% of the payment)',

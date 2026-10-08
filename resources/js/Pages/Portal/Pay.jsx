@@ -54,6 +54,7 @@ export default function Pay({
     idempotencyKey,
     leaseId,
     cardsEnabled = false,
+    echeckEnabled = true,
     cardFeeBasisPoints = 0,
     echeckFeeBasisPoints = 0,
     depositDue = '0.00',
@@ -75,7 +76,18 @@ export default function Pay({
     const fullOnly = policy?.partial_payment_policy === 'full_only' && ! payingDeposit;
 
     const [amount, setAmount] = useState(arrearsCents > 0 ? fromCents(arrearsCents) : '');
-    const [method, setMethod] = useState('echeck');
+
+    // [WP-56] Only the rails the gateway can actually take. eCheck.Net is a
+    // separate service from the Authorize.Net account, and without it the
+    // hosted page ignores the request for bank fields and renders a card form
+    // — so offering "Bank account" quotes the bank fee and then hands them a
+    // card page. Better to not offer it.
+    const available = [
+        echeckEnabled && { value: 'echeck', label: 'Bank account', rate: echeckFeeBasisPoints },
+        cardsEnabled && { value: 'card', label: 'Debit or credit card', rate: cardFeeBasisPoints },
+    ].filter(Boolean);
+
+    const [method, setMethod] = useState(available[0]?.value ?? 'echeck');
 
     // Both rails charge a percentage of what they are paying, so the figure
     // moves as they type. Two rates, one formula: the payment provider bills a
@@ -210,14 +222,17 @@ export default function Pay({
                 </Alert>
             )}
 
-            {hasLease && !gatewayReady && (
+            {/* [WP-56] A rail switched off counts as the gateway not being
+                ready. Showing the form with no way to pay is worse than
+                saying so. */}
+            {hasLease && (!gatewayReady || available.length === 0) && (
                 <Alert tone="warning" title="Online payment is not available yet">
                     We are still setting up online payments. Please contact the office to pay by
                     cheque, money order or card in person.
                 </Alert>
             )}
 
-            {hasLease && gatewayReady && (
+            {hasLease && gatewayReady && available.length > 0 && (
                 <>
                     <section className="mb-4 rounded-lg border border-gray-200 bg-white p-6">
                         <h2 className="text-sm text-gray-600">Balance due</h2>
@@ -353,30 +368,13 @@ export default function Pay({
                                 the payment provider's page, because the fee
                                 depends on it and has to be seen before it is
                                 agreed to. */}
-                            {cardsEnabled && (
+                            {available.length > 1 && (
                                 <fieldset className="mb-4">
                                     <legend className="text-base font-medium text-gray-900">
                                         How would you like to pay?
                                     </legend>
                                     <div className="mt-2 space-y-2">
-                                        {[
-                                            {
-                                                value: 'echeck',
-                                                label: 'Bank account',
-                                                note:
-                                                    echeckFeeBasisPoints > 0
-                                                        ? `A ${percentLabel(echeckFeeBasisPoints)}% fee is added.`
-                                                        : 'No fee.',
-                                            },
-                                            {
-                                                value: 'card',
-                                                label: 'Debit or credit card',
-                                                note:
-                                                    cardFeeBasisPoints > 0
-                                                        ? `A ${percentLabel(cardFeeBasisPoints)}% fee is added.`
-                                                        : 'No fee.',
-                                            },
-                                        ].map((option) => (
+                                        {available.map((option) => (
                                             <label
                                                 key={option.value}
                                                 className="flex min-h-touch items-center gap-3 rounded-md border border-gray-300 px-3 py-2 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50"
@@ -395,7 +393,9 @@ export default function Pay({
                                                 {/* Never colour alone: the fee
                                                     is stated in words. */}
                                                 <span className="ml-auto text-sm text-gray-600">
-                                                    {option.note}
+                                                    {option.rate > 0
+                                                        ? `A ${percentLabel(option.rate)}% fee is added.`
+                                                        : 'No fee.'}
                                                 </span>
                                             </label>
                                         ))}

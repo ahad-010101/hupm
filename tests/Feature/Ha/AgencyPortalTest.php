@@ -300,3 +300,31 @@ it('AC-PAY-23 charges an agency nothing now that the bank rail has a fee of its 
         // Not $902.50. The agency is billed the remittance and nothing else.
         ->and($payment->amount->toDecimalString())->toBe('900.00');
 });
+
+it('AC-HA-07 tells an agency to call the office when the bank rail is off', function () {
+    postSplitRent($this->lease);
+
+    app(Settings::class)->set('payments.echeck_enabled', 'false');
+
+    // An agency pays by bank transfer and by nothing else, so no bank rail
+    // means no rail at all. The button must not appear: it would send public
+    // money to a card form, which WP-43 settled it never touches.
+    $this->actingAs($this->officer)->get('/agency')
+        ->assertInertia(fn ($page) => $page->where('canPayOnline', false));
+});
+
+it('AC-HA-07 refuses an agency payment outright while the rail is off', function () {
+    postSplitRent($this->lease);
+
+    app(Settings::class)->set('payments.echeck_enabled', 'false');
+
+    Http::fake(['apitest.authorize.net/*' => Http::response(anetBody(['token' => 'tok']))]);
+
+    $this->actingAs($this->officer)->postJson('/agency/pay', [
+        'lease_id' => $this->lease->id,
+        'amount' => '900.00',
+        'idempotency_key' => (string) Str::uuid(),
+    ])->assertStatus(422);
+
+    expect(Payment::count())->toBe(0);
+});

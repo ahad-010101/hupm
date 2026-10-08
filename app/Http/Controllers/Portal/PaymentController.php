@@ -71,6 +71,11 @@ class PaymentController extends Controller
             // charge it, so what the tenant is shown and what they are charged
             // cannot drift.
             'cardsEnabled' => $this->settings->bool('payments.cards_enabled', false),
+            // [WP-56] eCheck.Net is a separate service from the gateway
+            // account. Without it the hosted page ignores `showBankAccount`
+            // and renders a card form, so offering the choice would quote the
+            // bank fee and then hand them a card page.
+            'echeckEnabled' => $this->settings->bool('payments.echeck_enabled', true),
             // [WP-39, changed 2026-09-05] The percentage, not an amount — the
             // fee now depends on what they choose to pay, so the page works it
             // out as they type. Basis points keep the page off floats too.

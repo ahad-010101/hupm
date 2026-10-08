@@ -372,17 +372,33 @@ class PaymentIntentService
      */
     private function assertMethodAvailable(string $method): void
     {
-        if ($method !== Payment::METHOD_CARD) {
-            return;
+        if ($method === Payment::METHOD_CARD) {
+            if ($this->settings->bool('payments.cards_enabled', false)) {
+                return;
+            }
+
+            throw ValidationException::withMessages([
+                'method' => 'Card payments are not available at the moment. '
+                    .'Please pay by bank transfer, or contact the office.',
+            ]);
         }
 
-        if ($this->settings->bool('payments.cards_enabled', false)) {
+        // [WP-56] Bank transfer needs eCheck.Net on the merchant account, which
+        // is a separate service from the gateway itself. Without it the hosted
+        // page does not refuse the request — it ignores `showBankAccount` and
+        // renders a card form. A resident who chose a bank transfer, and was
+        // quoted the bank fee, is then handed a card page; whatever they type
+        // is recorded against a payment this system believes is an eCheck.
+        //
+        // Refused here and not only in the UI, for AC-DEL-04's reason: the
+        // radio can be reconstructed by hand once it has disappeared.
+        if ($this->settings->bool('payments.echeck_enabled', true)) {
             return;
         }
 
         throw ValidationException::withMessages([
-            'method' => 'Card payments are not available at the moment. '
-                .'Please pay by bank transfer, or contact the office.',
+            'method' => 'Bank transfers are not available at the moment. '
+                .'Please pay by card, or contact the office.',
         ]);
     }
 

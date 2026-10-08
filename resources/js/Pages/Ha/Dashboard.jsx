@@ -17,7 +17,7 @@ import Money from '@/Components/Money';
  * Everything on this page is the agency's own portion (D-29). No figure here
  * belongs to a resident.
  */
-export default function Dashboard({ authority, leases = [], total, outstandingCount }) {
+export default function Dashboard({ authority, leases = [], total, outstandingCount, canPayOnline = true }) {
     const [busy, setBusy] = useState(null);
     const [error, setError] = useState(null);
     const gatewayForm = useRef(null);
@@ -109,7 +109,15 @@ export default function Dashboard({ authority, leases = [], total, outstandingCo
                 </Alert>
             )}
 
-            {outstanding.length > 0 && (
+            {/* [WP-56] No bank rail means no rail at all for an agency. */}
+            {outstanding.length > 0 && !canPayOnline && (
+                <Alert tone="warning" className="mb-6" title="Online payment is unavailable">
+                    Bank transfers are temporarily unavailable while the payment provider finishes
+                    setting them up. Please contact the office to arrange your remittance.
+                </Alert>
+            )}
+
+            {outstanding.length > 0 && canPayOnline && (
                 <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
                     <p className="text-base text-gray-800">
                         <strong>{outstandingCount}</strong>{' '}

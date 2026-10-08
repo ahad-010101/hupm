@@ -43,6 +43,8 @@ class SettingsSeeder extends Seeder
             // ── Payments ────────────────────────────────────────────────────
             ['payments.cards_enabled', 'false', 'bool', true,
                 'Q-7 (closed 2026-09-04, yes). Cards ship switched off; turning this on offers them alongside ACH (WP-39).'],
+            ['payments.echeck_enabled', 'true', 'bool', false,
+                'WP-56. Whether bank transfers are offered. Must be false unless eCheck.Net is live on the merchant account, or the gateway shows a card form to somebody who chose a bank transfer.'],
             ['payments.card_convenience_fee_percent', '0.00', 'string', true,
                 'Q-7a (changed from a flat amount 2026-09-05). Percentage of the payment added to a card transaction, posted as its own ledger line. Capped at 4% — it is a surcharge in card-brand terms. 0.00 means the landlord absorbs the cost.'],
             ['payments.echeck_fee_percent', '0.00', 'string', true,

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Lease;
 use App\Models\LedgerEntry;
 use App\Support\Money;
+use App\Support\Settings;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -67,6 +68,12 @@ class DashboardController extends Controller
             'leases' => $leases,
             'total' => (string) $this->balances->authorityBalance($authorityId),
             'outstandingCount' => $leases->where('is_outstanding', true)->count(),
+            // [WP-56] An agency pays by bank transfer and by nothing else, so
+            // when eCheck.Net is not live on the merchant account there is no
+            // rail for them at all. Offering the button would send them to a
+            // card form they must not use: this is public money, and WP-43
+            // settled that it is never charged a card or a fee.
+            'canPayOnline' => app(Settings::class)->bool('payments.echeck_enabled', true),
         ]);
     }
 
