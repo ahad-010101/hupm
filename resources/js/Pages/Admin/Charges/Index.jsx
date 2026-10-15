@@ -157,6 +157,22 @@ export default function Index({
                                 </option>
                             ))}
                         </select>
+
+                        {/* [WP-57] The way to the charge-type manager used to
+                            exist only in the empty state, so it disappeared the
+                            moment you created your first type — and adding a
+                            second purpose meant knowing the URL. A purpose that
+                            is not in this list is exactly when somebody needs
+                            this link, which is why it belongs under the list. */}
+                        <p className="mt-2 text-sm text-gray-600">
+                            Not here?{' '}
+                            <Link
+                                href="/admin/charges/types"
+                                className="font-medium text-brand-700 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                            >
+                                Add or edit charge types
+                            </Link>
+                        </p>
                     </FormField>
 
                     <FormField

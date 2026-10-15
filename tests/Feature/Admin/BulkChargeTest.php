@@ -367,3 +367,52 @@ it('keeps non-admins out of bulk charging', function (string $role) {
 
     expect(LedgerEntry::count())->toBe(0);
 })->with(['tenant', 'owner']);
+
+/*
+ |--------------------------------------------------------------------------
+ | Getting to the charge-type manager  [WP-57]
+ |--------------------------------------------------------------------------
+ |
+ | The link to it lived only in the empty state, so it disappeared the moment
+ | the first type was created — and adding a second purpose meant knowing the
+ | URL. A screen you can only reach before you have used the feature is a
+ | screen most people conclude does not exist.
+ |
+ */
+
+it('AC-CHG-15 offers a way to the charge-type manager once types already exist', function () {
+    expect(ChargeType::count())->toBeGreaterThan(0);
+
+    // Asserted against the component source, not the response: this is an
+    // Inertia page, so the server sends a prop bag and the link is rendered by
+    // React. `assertSee` on the HTML would pass or fail for the wrong reasons.
+    $source = file_get_contents(resource_path('js/Pages/Admin/Charges/Index.jsx'));
+
+    // The link used to sit INSIDE the `types.length === 0` branch, so it
+    // vanished the moment the first type existed — exactly when somebody
+    // needs it, because the purpose they want is not in the list.
+    $emptyStateBranch = substr($source, 0, strpos($source, '</EmptyState>') ?: 0);
+
+    expect($source)->toContain('/admin/charges/types')
+        ->and(substr_count($source, '/admin/charges/types'))->toBeGreaterThan(
+            substr_count($emptyStateBranch, '/admin/charges/types'),
+            'The only link to the charge-type manager is in the empty state, so it disappears once a type exists.',
+        );
+});
+
+it('AC-CHG-15 keeps the charge-type manager reachable and usable', function () {
+    $this->actingAs($this->admin)->get('/admin/charges/types')->assertOk();
+
+    $this->actingAs($this->admin)->post('/admin/charges/types', [
+        'name' => 'Pest control',
+        'category' => 'utility',
+        'default_description' => 'Pest control visit',
+        'default_amount' => '40.00',
+        'payer' => 'tenant',
+        // Required: a type with no active flag has no defined state, and the
+        // dropdown would not know whether to offer it.
+        'active' => true,
+    ])->assertRedirect();
+
+    expect(ChargeType::where('name', 'Pest control')->exists())->toBeTrue();
+});
