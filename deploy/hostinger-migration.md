@@ -222,10 +222,35 @@ Decide before Stage 7, because the DNS change is where it takes effect.
 ## Stage 8 — Finish
 
 **The cron is the one that fails silently.** Without it charges never post and
-balances drift, with no error anywhere:
+balances drift, with no error anywhere.
 
-```
-* * * * * <absolute-php> /home/<user>/hupm/artisan schedule:run >> /dev/null 2>&1
+⚠ **hPanel's cron field is not a shell command line.** Whatever you type, it
+runs `/usr/bin/php /home/<user>/<what you typed>`. Pasting a full command
+produces `/usr/bin/php /home/<user>//opt/alt/php83/usr/bin/php ...` and fails
+with `Could not open input file` — PHP handed the PHP binary as a script.
+
+Typing `hupm/artisan schedule:run` does work, but `/usr/bin/php` is **8.2.35**
+while the web server runs **8.3.36**. The project declares `^8.2`, so nothing
+breaks today; it would mean every scheduled job runs on a different PHP from
+every web request, which is how you get a bug that only ever appears in cron.
+
+So hPanel points at a shim that hands off to 8.3. Copy
+`deploy/hostinger-cron-shim.php` to `~/hupm-cron.php` (outside the release
+directory, so a deploy never replaces it), adjusting the two constants, then:
+
+| hPanel field | Value |
+|---|---|
+| Command to run | `hupm-cron.php` |
+| Schedule | every minute — `* * * * *` |
+
+The shim uses `proc_open`, not `passthru`. This account disables `system`,
+`exec`, `shell_exec`, `passthru` and `popen`; `proc_open` is the only one left,
+which is also why Laravel's scheduler can run background jobs here at all.
+
+Test it exactly as hPanel will invoke it before trusting the schedule:
+
+```bash
+/usr/bin/php /home/<user>/hupm-cron.php
 ```
 
 Verify by effect, not by listing it — the heartbeat should be under a minute
