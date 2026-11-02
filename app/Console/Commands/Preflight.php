@@ -6,6 +6,7 @@ use App\Domain\Payments\AuthorizeNetGateway;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Throwable;
 
 /**
@@ -159,12 +160,23 @@ class Preflight extends Command
     }
 
     /**
-     * The mail transport, and the webhook secret it makes mandatory.
+     * The mail transport, and the two separate things that can go wrong with
+     * the Resend webhook.
      *
      * resend/resend-laravel registers POST /resend/webhook unconditionally and
      * verifies signatures only when `resend.webhook.secret` is set — a blank
-     * secret disables the check, not the route. That fails open, so an empty
-     * secret is treated here as a hard failure rather than a warning.
+     * secret disables the check, not the route. These used to be reported as
+     * one check, which conflated a security hole with a missing feature and
+     * blocked deploys for the wrong reason. They are distinct:
+     *
+     *   - An exposed package route is a security failure. It is closed
+     *     structurally by `resend.domain` (see config/resend.php), so it holds
+     *     whether or not the secret is set. Hard fail.
+     *
+     *   - A missing secret means OUR handler, POST /webhooks/resend, answers
+     *     503 and bounce events are never recorded. Notifications still send;
+     *     FR-NTF-01 delivery tracking is inert. Real, but not a security hole
+     *     and not a reason to refuse a deploy. Warning.
      */
     private function checkRuntimeDrivers(): void
     {
@@ -191,12 +203,39 @@ class Preflight extends Command
         $this->record('RESEND_API_KEY set', $apiKey === '' ? 'MISSING' : 'present', $apiKey !== '');
 
         $secret = (string) config('resend.webhook.secret');
+
+        // Assert the package route cannot be reached on the host this
+        // application answers on. Reading the compiled route rather than the
+        // config value means a stray RESEND_DOMAIN that happens to equal our
+        // own hostname is caught too.
+        $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
+        $routeDomain = Route::getRoutes()->getByName('resend.webhook')?->getDomain();
+
+        if ($routeDomain === null) {
+            $exposure = 'EXPOSED - bound to every host, including '.($appHost ?: 'this one');
+        } elseif ($appHost !== '' && strcasecmp($routeDomain, $appHost) === 0) {
+            $exposure = "EXPOSED - bound to {$routeDomain}, which is this application";
+        } else {
+            $exposure = "unreachable here (bound to {$routeDomain})";
+        }
+
+        $exposed = str_starts_with($exposure, 'EXPOSED');
+
+        // Only an exposure that is ALSO unverified is a hole; with a secret
+        // set the package does check signatures.
+        $this->record(
+            'package route POST /resend/webhook',
+            $exposed && $secret === '' ? $exposure.', and unsigned' : $exposure,
+            ! ($exposed && $secret === ''),
+        );
+
         $this->record(
             'RESEND_WEBHOOK_SECRET set',
             $secret === ''
-                ? 'MISSING — the package leaves POST /resend/webhook unauthenticated'
+                ? 'missing - /webhooks/resend answers 503, so bounces are not recorded'
                 : 'present',
             $secret !== '',
+            required: false,
         );
     }
 

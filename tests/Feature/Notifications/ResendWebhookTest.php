@@ -143,13 +143,35 @@ it('acknowledges an event for a message it does not know', function () {
         ->assertOk();
 });
 
-it('the packages own webhook route rejects unsigned requests once the secret is set', function () {
+it('the packages own webhook route is unreachable on this application, with or without a secret', function () {
     // resend/resend-laravel registers POST /resend/webhook unconditionally and
     // verifies signatures only when resend.webhook.secret is truthy — a blank
-    // secret disables the CHECK, not the route. This asserts the mitigation
-    // holds: with the secret configured, the dependency's endpoint is closed.
-    config()->set('resend.webhook.secret', WEBHOOK_SECRET);
+    // secret disables the CHECK, not the route.
+    //
+    // Requiring the secret was the old mitigation, and it was one cleared
+    // environment variable away from reopening an unauthenticated endpoint
+    // that dispatches events from attacker-controlled input. It did reach
+    // production that way: on 2 November 2026 the live site answered this
+    // route with no secret set.
+    //
+    // The guard is now structural. config/resend.php binds the package's route
+    // group to an RFC 2606 `.invalid` domain, so the route cannot match a
+    // request to our own hostname at all — Laravel 404s before the controller
+    // is constructed. Asserting BOTH secret states is the point of the test:
+    // the mitigation must not depend on the secret.
+    $payload = ['type' => 'email.delivered', 'data' => ['email_id' => 'msg_abc123']];
 
-    $this->postJson('/resend/webhook', ['type' => 'email.delivered', 'data' => ['email_id' => 'msg_abc123']])
-        ->assertStatus(403);
+    config()->set('resend.webhook.secret', null);
+    $this->postJson('/resend/webhook', $payload)->assertNotFound();
+
+    config()->set('resend.webhook.secret', WEBHOOK_SECRET);
+    $this->postJson('/resend/webhook', $payload)->assertNotFound();
+});
+
+it('our own handler is still routable', function () {
+    // The guard above must close the dependency's route and nothing else.
+    // Without this, a typo in the domain constraint could silently take out
+    // bounce tracking and the suite would still be green.
+    signedPost(['type' => 'email.delivered', 'data' => ['email_id' => 'msg_abc123']])
+        ->assertNoContent();
 });

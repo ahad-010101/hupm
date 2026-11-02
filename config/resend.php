@@ -58,9 +58,27 @@ return [
     | If the setting is null, Resend will reside under the same domain as your
     | application. Otherwise, this value will be used as the subdomain.
     |
+    | WE USE IT AS A KILL SWITCH. The provider wraps the package route in
+    | `Route::group(['domain' => config('resend.domain')])`, so a domain that
+    | can never be requested makes POST /resend/webhook unreachable on our own
+    | hostname — a 404 before the controller is constructed.
+    |
+    | That matters because the secret alone is not a safe guard. Per the note
+    | at the top of this file, the package applies its signature middleware
+    | only `if (config('resend.webhook.secret'))`, so an empty secret leaves
+    | the route open rather than closing it. Relying on the secret means one
+    | cleared environment variable silently reopens an unauthenticated
+    | endpoint; relying on the domain means it stays shut either way.
+    |
+    | `.invalid` is reserved by RFC 2606 and resolves nowhere by definition,
+    | so this is not an obscure hostname someone might one day register.
+    |
+    | HUPM's own handler, POST /webhooks/resend, is unaffected — it is
+    | registered in routes/webhooks.php, not by the package.
+    |
     */
 
-    'domain' => env('RESEND_DOMAIN', null),
+    'domain' => env('RESEND_DOMAIN', 'resend-webhook.invalid'),
 
     /*
     |--------------------------------------------------------------------------
