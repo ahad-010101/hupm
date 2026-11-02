@@ -396,6 +396,42 @@ class Preflight extends Command
         );
     }
 
+    /**
+     * The cron line to install.
+     *
+     * base_path() is the RELEASE directory — .../releases/20261102174158-1b70363
+     * — and a cron entry naming it works right up until the next deploy prunes
+     * that release. Then every scheduled job stops: no charges post, no fees,
+     * no delinquency evaluation, and nothing anywhere reports an error. That is
+     * R-5, the exact failure this command exists to catch, and printing the
+     * release path was walking the operator into it.
+     *
+     * Deploys publish a stable symlink beside releases/ ($HOME/hupm) that is
+     * repointed each time. Find it by resolution rather than by name, so a
+     * differently-named deploy_path still works, and fall back to the literal
+     * path when there is no symlink — on a non-release install that IS stable.
+     */
+    private function cronCommand(): string
+    {
+        return PHP_BINARY.' '.$this->stableArtisanPath().' schedule:run >> /dev/null 2>&1';
+    }
+
+    private function stableArtisanPath(): string
+    {
+        $release = realpath(base_path()) ?: base_path();
+        $parent = dirname($release);
+
+        if (basename($parent) === 'releases') {
+            foreach ((array) glob(dirname($parent).'/*', GLOB_ONLYDIR) as $candidate) {
+                if (is_link($candidate) && realpath($candidate) === $release) {
+                    return $candidate.'/artisan';
+                }
+            }
+        }
+
+        return base_path('artisan');
+    }
+
     private function checkScheduler(): void
     {
         // Cannot prove cron from inside PHP. Report the exact line to install and
@@ -405,7 +441,7 @@ class Preflight extends Command
             '<fg=yellow>cron (verify by observed effect, not by crontab listing)</>',
             '',
         );
-        $this->line('  * * * * * '.PHP_BINARY.' '.base_path('artisan').' schedule:run >> /dev/null 2>&1');
+        $this->line('  * * * * * '.$this->cronCommand());
     }
 
     private function render(): void
@@ -441,7 +477,7 @@ class Preflight extends Command
         $lines[] = '## Cron entry to install';
         $lines[] = '';
         $lines[] = '```';
-        $lines[] = '* * * * * '.PHP_BINARY.' '.base_path('artisan').' schedule:run >> /dev/null 2>&1';
+        $lines[] = '* * * * * '.$this->cronCommand();
         $lines[] = '```';
         $lines[] = '';
         $lines[] = 'Cron must be proven by observed effect (a job_runs row), not by a crontab listing.';
