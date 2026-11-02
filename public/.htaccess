@@ -86,8 +86,24 @@ Options -Indexes
 #
 # Scope is this directory only. The parent rule is untouched and PHP stays
 # denied everywhere else on the account.
+#
+# ⚠ GUARDED, AND IT HAS TO BE.  [2 Nov 2026]
+#
+# This block shipped unguarded, unlike every other directive in this file, and
+# it took the site down on the first Hostinger deploy. `Order` and `Allow` come
+# from mod_access_compat. Where that module is absent — LiteSpeed, as Hostinger
+# runs — the directive is not merely ignored: the whole .htaccess is rejected,
+# so the Laravel rewrite never loads. The symptom is deceptive. The home page
+# still works, because index.php is the DirectoryIndex and needs no rewrite,
+# while every other URL returns 404. It reads as a routing bug in the
+# application and is nothing of the kind.
+#
+# The file's own header says a directive the running Apache does not understand
+# is "a 500 for the whole site"; this is the same hazard with a quieter symptom.
 # ---------------------------------------------------------------------------
-<FilesMatch "\.(php|php5|phtml)$">
-    Order allow,deny
-    Allow from all
-</FilesMatch>
+<IfModule mod_access_compat.c>
+    <FilesMatch "\.(php|php5|phtml)$">
+        Order allow,deny
+        Allow from all
+    </FilesMatch>
+</IfModule>
