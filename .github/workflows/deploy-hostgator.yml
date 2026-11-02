@@ -1,5 +1,22 @@
-name: Deploy — HostGator (headsuppm.com)
+name: Deploy — HostGator (RETIRED, do not run)
 
+# ⛔ RETIRED, 2 November 2026. DO NOT RUN THIS.
+#
+# headsuppm.com now lives on Hostinger. Use
+# deploy-hostinger-production.yml instead.
+#
+# The HostGator account was compromised on 25 October 2026 (298,856
+# infections across fifteen WordPress installations) and PHP was disabled
+# account-wide on 28 October. On 2 November its cron was removed and
+# ~/shared/.env deleted, so a deploy here would land on a host that cannot
+# boot the application and would not be serving it in any case.
+#
+# Kept rather than deleted because the paths below are the only record of
+# how that account was laid out, and because the $HOME guard in _deploy.yml
+# exists entirely because of the partition move documented here.
+#
+# Everything below is historical.
+#
 # PRODUCTION. Manual only.
 #
 # This system moves rent and ledger rows are immutable (I-3), so a migration

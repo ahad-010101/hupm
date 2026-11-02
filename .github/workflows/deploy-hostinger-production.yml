@@ -1,0 +1,60 @@
+name: Deploy — Hostinger (headsuppm.com, production)
+
+# PRODUCTION. Manual only.
+#
+# This system moves rent and ledger rows are immutable (I-3), so a migration
+# must never run because somebody merged a README change.
+#
+# Replaces deploy-hostgator.yml, which is retired. The HostGator account was
+# compromised on 25 October 2026 — 298,856 infections across fifteen WordPress
+# installations — and PHP was disabled account-wide on 28 October. HUPM itself
+# was never modified, so this is a relocation of healthy code and data rather
+# than a recovery. See deploy/hostinger-migration.md.
+#
+# The work happens in _deploy.yml. This file is only the seven values that make
+# a server this server, kept here rather than in GitHub Variables because none
+# of them is secret and a path you can read in a diff is worth more than one
+# you have to go and look up in a settings page.
+#
+# Secrets DO come from the environment — SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS,
+# SSH_HOST and SSH_USER live in the `production-hostinger` Environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run database migrations'
+        type: boolean
+        default: true
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
+    with:
+      environment: production-hostinger
+
+      home_dir: /home/u468256881
+      deploy_path: /home/u468256881/hupm
+
+      # Hostinger puts every domain under ~/domains/<domain>/public_html,
+      # including the primary one — there is no bare ~/public_html here, and
+      # no generated website_* directory as on HostGator. This is a real
+      # directory rather than a symlink to the release's public/, so the core
+      # workflow's split-root handling applies: it copies public/ in and
+      # rewrites index.php to absolute paths through the deploy_path symlink.
+      docroot: /home/u468256881/domains/headsuppm.com/public_html
+
+      # Absolute, never bare `php`. On this account bare `php` resolves to
+      # /opt/alt/php82/usr/bin/php — 8.2, NOT the 8.3 the web server and the
+      # build runner use. Composer's platform_check would abort every command.
+      # cron with a wrong PHP path is the single most common shared-hosting
+      # failure and it fails silently (R-5).
+      php_cli: /opt/alt/php83/usr/bin/php
+
+      app_url: https://headsuppm.com
+
+      # Hostinger's standard SSH port, not cPanel's 2222.
+      ssh_port: '65002'
+
+      run_migrations: ${{ inputs.run_migrations }}
